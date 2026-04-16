@@ -1,0 +1,212 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml"
+      id="zotero-prefpane-zoteropaperreading"
+      flex="1"
+      class="zpr-root"
+      onload="Zotero.ZoteroPaperReading.hooks.onPrefsLoad(event)">
+
+  <html:style>
+    .zpr-root {
+      padding: 18px;
+      color-scheme: light dark;
+      background: Canvas;
+      color: CanvasText;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+    .zpr-card {
+      background: Field;
+      color: FieldText;
+      border: 1px solid GrayText;
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 14px;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+    }
+    .zpr-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .zpr-subtitle {
+      font-size: 13px;
+      color: GrayText;
+      margin-bottom: 16px;
+    }
+    .zpr-summary {
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: color-mix(in srgb, AccentColor 8%, Field);
+      border: 1px solid color-mix(in srgb, AccentColor 18%, GrayText);
+      margin-top: 12px;
+    }
+    .zpr-summary-title {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .zpr-summary-body {
+      font-size: 12px;
+      line-height: 1.5;
+      color: GrayText;
+    }
+    .zpr-section-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 12px;
+      color: CanvasText;
+    }
+    .zpr-field {
+      margin-bottom: 14px;
+    }
+    .zpr-label {
+      display: block;
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    .zpr-help {
+      display: block;
+      margin-top: 6px;
+      color: GrayText;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .zpr-inline-help {
+      display: block;
+      margin-top: 2px;
+      color: GrayText;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .zpr-input,
+    .zpr-textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid GrayText;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      color: FieldText;
+      background: Field;
+    }
+    .zpr-textarea {
+      min-height: 88px;
+      resize: vertical;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    }
+    .zpr-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    #toggleAdvancedBtn {
+      margin: 2px 0 12px;
+      align-self: flex-start;
+    }
+    #advancedSettings {
+      padding-top: 6px;
+      border-top: 1px dashed GrayText;
+    }
+    button {
+      color: ButtonText;
+      background: ButtonFace;
+    }
+    .zpr-status {
+      font-size: 12px;
+      color: AccentColor;
+      visibility: hidden;
+    }
+  </html:style>
+
+  <vbox class="zpr-card">
+    <html:div class="zpr-title">Zotero Paper Reading</html:div>
+    <html:div id="zpr-subtitle" class="zpr-subtitle">在 PDF 阅读器中为论文提供可继续追问的 Ask AI 聊天侧栏，并将当前会话保存为 Zotero 子笔记。</html:div>
+  </vbox>
+
+  <vbox class="zpr-card">
+    <html:div id="zpr-language-title" class="zpr-section-title">语言与体验</html:div>
+    <html:div id="zpr-language-body" class="zpr-inline-help">界面与解读语言会自动跟随 Zotero 当前语言。</html:div>
+  </vbox>
+
+  <vbox class="zpr-card">
+    <html:div id="zpr-backend-title" class="zpr-section-title">后端模式</html:div>
+
+    <html:div class="zpr-field">
+      <html:label id="zpr-backend-mode-label" class="zpr-label" for="backendMode">运行模式</html:label>
+      <html:select id="backendMode" class="zpr-input">
+        <html:option value="direct">插件直连模型</html:option>
+        <html:option value="companion">本地 companion 服务</html:option>
+      </html:select>
+      <html:span id="zpr-backend-mode-help" class="zpr-help">选择由插件直连模型，或转发到本地 companion 服务。</html:span>
+    </html:div>
+
+    <html:div class="zpr-summary">
+      <html:div id="zpr-mode-summary-title" class="zpr-summary-title">当前模式建议</html:div>
+      <html:div id="zpr-mode-summary-body" class="zpr-summary-body">直连模式下，通常只需要填写 API 地址、API Key 和模型名称即可开始使用。</html:div>
+    </html:div>
+  </vbox>
+
+  <vbox class="zpr-card">
+    <html:div id="zpr-credentials-title" class="zpr-section-title">连接与凭据</html:div>
+
+    <html:div class="zpr-field zpr-direct-only">
+      <html:label id="zpr-provider-label" class="zpr-label" for="directProvider">直连协议</html:label>
+      <html:select id="directProvider" class="zpr-input">
+        <html:option value="openai-compatible">OpenAI Compatible</html:option>
+        <html:option value="anthropic">Anthropic</html:option>
+        <html:option value="google">Google Gemini</html:option>
+      </html:select>
+    </html:div>
+
+    <html:div class="zpr-field zpr-direct-only">
+      <html:label id="zpr-api-address-label" class="zpr-label" for="apiAddress">API 地址</html:label>
+      <html:input id="apiAddress" class="zpr-input" type="text"/>
+      <html:span id="zpr-api-address-help" class="zpr-help">通常只在自定义接口或私有部署时需要修改。</html:span>
+    </html:div>
+
+    <html:div class="zpr-field zpr-direct-only">
+      <html:label id="zpr-api-key-label" class="zpr-label" for="apiKey">API Key</html:label>
+      <html:input id="apiKey" class="zpr-input" type="password"/>
+      <html:span id="zpr-api-key-help" class="zpr-help">如果服务不要求密钥，可以留空。</html:span>
+    </html:div>
+
+    <html:div class="zpr-field zpr-direct-only">
+      <html:label id="zpr-model-name-label" class="zpr-label" for="modelName">模型名称</html:label>
+      <html:input id="modelName" class="zpr-input" type="text"/>
+      <html:span id="zpr-model-name-help" class="zpr-help">建议选择支持长上下文文档理解的模型。</html:span>
+    </html:div>
+
+    <html:div class="zpr-field zpr-companion-only">
+      <html:label id="zpr-companion-url-label" class="zpr-label" for="companionUrl">Companion 地址</html:label>
+      <html:input id="companionUrl" class="zpr-input" type="text"/>
+      <html:span id="zpr-companion-url-help" class="zpr-help">例如 `http://127.0.0.1:8765`。插件会向 `/chat` 发起请求。</html:span>
+    </html:div>
+  </vbox>
+
+  <vbox class="zpr-card">
+    <html:div id="zpr-advanced-title" class="zpr-section-title">高级设置</html:div>
+    <button id="toggleAdvancedBtn" label="显示高级设置"/>
+
+    <vbox id="advancedSettings" data-open="false">
+      <html:div class="zpr-field">
+        <html:label id="zpr-timeout-label" class="zpr-label" for="requestTimeoutMs">请求超时（毫秒）</html:label>
+        <html:input id="requestTimeoutMs" class="zpr-input" type="text"/>
+        <html:span id="zpr-timeout-help" class="zpr-help">文档较长时可以适当提高，默认 120000。</html:span>
+      </html:div>
+
+      <html:div class="zpr-field">
+        <html:label id="zpr-sidebar-width-label" class="zpr-label" for="sidebarWidth">侧栏宽度</html:label>
+        <html:input id="sidebarWidth" class="zpr-input" type="text"/>
+        <html:span id="zpr-sidebar-width-help" class="zpr-help">默认 420。reader 内挂载失败时也会沿用该宽度进行降级显示。</html:span>
+      </html:div>
+    </vbox>
+  </vbox>
+
+  <hbox class="zpr-actions">
+    <button id="saveBtn" label="保存设置">保存设置</button>
+    <button id="resetBtn" label="恢复默认">恢复默认</button>
+    <html:span id="settingsStatus" class="zpr-status">已保存</html:span>
+  </hbox>
+
+</vbox>

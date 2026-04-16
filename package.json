@@ -1,0 +1,30 @@
+{
+  "name": "zotero-paper-reading-plugin",
+  "version": "0.1.0",
+  "description": "A Zotero 7+ plugin that adds an Ask AI paper reading sidebar for PDF attachments.",
+  "type": "module",
+  "author": "Playitcooool",
+  "homepage": "https://github.com/Playitcooool/zotero-paper-reading-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Playitcooool/zotero-paper-reading-plugin.git"
+  },
+  "config": {
+    "addonName": "Zotero Paper Reading",
+    "addonID": "zoteropaperreading@plugin.local",
+    "addonRef": "zoteropaperreading",
+    "prefsPrefix": "extensions.zotero.zoteropaperreading",
+    "addonInstance": "ZoteroPaperReading"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "build": "zotero-plugin build",
+    "watch": "zotero-plugin serve",
+    "start": "zotero-plugin serve"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "zotero-plugin-scaffold": "^0.8.2",
+    "zotero-types": "^4.1.0-beta.3"
+  }
+}

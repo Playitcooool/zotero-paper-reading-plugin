@@ -1,0 +1,8 @@
+build/
+node_modules
+node_modules/
+dist/
+*.xpi
+.env
+.scaffold
+.DS_Store
