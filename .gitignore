@@ -6,3 +6,4 @@ dist/
 .env
 .scaffold
 .DS_Store
+.worktrees/
