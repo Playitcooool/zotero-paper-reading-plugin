@@ -32,8 +32,6 @@ export interface ReaderPanelHost {
     handlers: {
       onReferenceClick: (reference: EvidenceReference) => void;
       onSubmit: (question: string) => void;
-      onRegenerate: () => void;
-      onClear: () => void;
       onRetryFailedTurn?: () => void;
     },
     options?: {
@@ -199,8 +197,6 @@ class FixedSidebarHost implements ReaderPanelHost {
     handlers: {
       onReferenceClick: (reference: EvidenceReference) => void;
       onSubmit: (question: string) => void;
-      onRegenerate: () => void;
-      onClear: () => void;
       onRetryFailedTurn?: () => void;
     },
     options: {
@@ -221,41 +217,15 @@ class FixedSidebarHost implements ReaderPanelHost {
     this.content.innerHTML = "";
     const isBusy = Boolean(options.isBusy);
 
-    const toolbar = this.doc.createElement("div");
-    toolbar.className = "zpr-result-head";
-    toolbar.innerHTML = `
-      <div class="zpr-result-actions">
-        <button type="button" class="zpr-toolbar-button" data-zpr-action="copy-chat">${escapeHtml(this.strings.panel.transcriptCopy)}</button>
-        <button type="button" class="zpr-toolbar-button" data-zpr-action="regenerate">${escapeHtml(this.strings.panel.regenerate)}</button>
-        <button type="button" class="zpr-toolbar-button zpr-toolbar-button-danger" data-zpr-action="clear">${escapeHtml(this.strings.panel.clear)}</button>
-      </div>
-    `;
-    this.content.appendChild(toolbar);
-
-    const toolbarButtons = toolbar.querySelectorAll("[data-zpr-action]");
-    toolbarButtons.forEach((node) => {
-      (node as HTMLButtonElement).disabled = isBusy;
-    });
-
-    const copyChatButton = toolbar.querySelector('[data-zpr-action="copy-chat"]') as HTMLButtonElement | null;
-    copyChatButton?.addEventListener("click", () => {
-      void copyText(this.doc, buildSessionPlainText(session, this.strings)).then((copied) => {
-        if (copied && copyChatButton) {
-          flashCopiedLabel(this.doc, copyChatButton, this.strings.panel.transcriptCopy, this.strings.panel.copied);
-        }
-      });
-    });
-
-    toolbar.querySelector('[data-zpr-action="regenerate"]')?.addEventListener("click", () => {
-      if (!isBusy) {
-        handlers.onRegenerate();
-      }
-    });
-    toolbar.querySelector('[data-zpr-action="clear"]')?.addEventListener("click", () => {
-      if (!isBusy) {
-        handlers.onClear();
-      }
-    });
+    const toolbarActions = buildPanelToolbarActions(this.strings);
+    if (toolbarActions.length) {
+      const toolbar = this.doc.createElement("div");
+      toolbar.className = "zpr-result-head";
+      toolbar.innerHTML = `<div class="zpr-result-actions">${toolbarActions.map((action) => (
+        `<button type="button" class="zpr-toolbar-button${action.danger ? " zpr-toolbar-button-danger" : ""}" data-zpr-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>`
+      )).join("")}</div>`;
+      this.content.appendChild(toolbar);
+    }
 
     if (options.notice) {
       const notice = this.doc.createElement("div");
@@ -287,7 +257,6 @@ class FixedSidebarHost implements ReaderPanelHost {
       error.className = "zpr-message zpr-message-assistant zpr-message-error";
       error.innerHTML = `
         <div class="zpr-message-meta">
-          <div class="zpr-message-role">${escapeHtml(this.strings.panel.roleAssistant)}</div>
           <div class="zpr-message-time">${escapeHtml(formatMessageTimestamp(options.failedTurn.createdAt))}</div>
         </div>
         <div class="zpr-pending">${escapeHtml(options.failedTurn.errorMessage)}</div>
@@ -397,17 +366,18 @@ class FixedSidebarHost implements ReaderPanelHost {
 
   private buildMessageBubble(message: ChatMessage, onReferenceClick: (reference: EvidenceReference) => void): HTMLDivElement {
     const bubble = this.doc.createElement("div");
-    bubble.className = `zpr-message zpr-message-${message.role}${message.status === "pending" ? " zpr-message-streaming" : ""}`;
+    bubble.className = `zpr-message zpr-message-${message.role}${getMessageBubbleStateClasses(message).map((name) => ` ${name}`).join("")}`;
     const bodyHtml = message.role === "assistant" && !message.markdown.trim() && message.status === "pending"
-      ? `<div class="zpr-pending">${escapeHtml(this.strings.panel.thinking)}</div>`
+      ? buildPendingIndicatorMarkup(this.strings)
       : `<div class="zpr-message-body">${renderMarkdownToHtml(message.markdown, message.citations)}</div>`;
+    const messageMeta = buildVisibleMessageMeta(message, this.strings);
     bubble.innerHTML = `
       <div class="zpr-message-meta">
-        <div class="zpr-message-role">${escapeHtml(message.role === "user" ? this.strings.panel.roleUser : this.strings.panel.roleAssistant)}</div>
+        ${messageMeta.showRole ? `<div class="zpr-message-role">${escapeHtml(messageMeta.roleLabel)}</div>` : "<div></div>"}
         <div class="zpr-message-time">${escapeHtml(formatMessageTimestamp(message.createdAt))}</div>
       </div>
       ${bodyHtml}
-      ${message.role === "assistant" ? `<div class="zpr-message-actions"><button type="button" class="zpr-text-button" data-zpr-message-copy="${escapeHtml(message.id)}">${escapeHtml(this.strings.panel.copyMessage)}</button></div>` : ""}
+      ${shouldShowMessageCopyButton(message) ? `<div class="zpr-message-actions"><button type="button" class="zpr-text-button" data-zpr-message-copy="${escapeHtml(message.id)}">${escapeHtml(this.strings.panel.copyMessage)}</button></div>` : ""}
     `;
     bindCitationClicks(bubble, message.citations, onReferenceClick);
 
@@ -495,7 +465,13 @@ class FixedSidebarHost implements ReaderPanelHost {
     }
     const style = this.doc.createElement("style");
     style.id = "zpr-sidebar-style";
-    style.textContent = `
+    style.textContent = getSidebarStyles();
+    this.doc.documentElement.appendChild(style);
+  }
+}
+
+export function getSidebarStyles(): string {
+  return `
       #zpr-sidebar-root {
         position: fixed;
         top: 0;
@@ -507,12 +483,17 @@ class FixedSidebarHost implements ReaderPanelHost {
         box-sizing: border-box;
         pointer-events: none;
         display: flex;
+        position: fixed;
       }
       .zpr-sidebar-hidden {
         display: none;
       }
       .zpr-sidebar-resize {
-        width: 12px;
+        position: absolute;
+        left: -12px;
+        top: 0;
+        bottom: 0;
+        width: 24px;
         cursor: col-resize;
         pointer-events: auto;
       }
@@ -657,13 +638,14 @@ class FixedSidebarHost implements ReaderPanelHost {
       }
       .zpr-message-streaming::after {
         content: "";
-        display: inline-block;
+        position: absolute;
+        right: 12px;
+        bottom: 12px;
         width: 8px;
         height: 8px;
-        margin-left: 6px;
         border-radius: 999px;
         background: #2563eb;
-        opacity: 0.5;
+        animation: zpr-stream-pulse 1s ease-in-out infinite;
       }
       .zpr-message-meta {
         display: flex;
@@ -796,6 +778,13 @@ class FixedSidebarHost implements ReaderPanelHost {
         padding: 10px 12px;
         resize: vertical;
         font: inherit;
+        background: rgba(248, 250, 252, 0.95);
+        color: #0f172a;
+      }
+      .zpr-composer-input:focus {
+        outline: none;
+        border-color: rgba(100, 116, 139, 0.55);
+        box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.15);
       }
       .zpr-composer-send {
         align-self: end;
@@ -838,14 +827,33 @@ class FixedSidebarHost implements ReaderPanelHost {
         font-size: 12px;
         line-height: 1.5;
       }
+      .zpr-pending {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .zpr-spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(148, 163, 184, 0.35);
+        border-top-color: #2563eb;
+        border-radius: 999px;
+        animation: zpr-spin 0.8s linear infinite;
+        flex: none;
+      }
+      @keyframes zpr-spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes zpr-stream-pulse {
+        0%, 100% { opacity: 0.35; transform: scale(0.85); }
+        50% { opacity: 0.95; transform: scale(1); }
+      }
       button:disabled,
       textarea:disabled {
         cursor: not-allowed;
         opacity: 0.6;
       }
     `;
-    this.doc.documentElement.appendChild(style);
-  }
 }
 
 class NoopPanelHost implements ReaderPanelHost {
@@ -926,6 +934,31 @@ export function buildVisibleSessionMeta(
     title: session.paper.title || strings.panel.untitledPaper,
     detail: session.paper.year || ""
   };
+}
+
+export function buildPanelToolbarActions(_strings: PluginStrings): Array<{ id: string; label: string; danger?: boolean }> {
+  return [];
+}
+
+export function buildVisibleMessageMeta(
+  message: ChatMessage,
+  strings: PluginStrings
+): { roleLabel: string; showRole: boolean } {
+  if (message.role === "assistant") {
+    return { roleLabel: "", showRole: false };
+  }
+  return {
+    roleLabel: strings.panel.roleUser,
+    showRole: true
+  };
+}
+
+export function shouldShowMessageCopyButton(message: ChatMessage): boolean {
+  return message.role === "assistant" && message.status === "done";
+}
+
+export function buildPendingIndicatorMarkup(strings: PluginStrings): string {
+  return `<div class="zpr-pending"><span class="zpr-spinner" aria-hidden="true"></span><span>${escapeHtml(strings.panel.thinking)}</span></div>`;
 }
 
 function bindCitationClicks(root: HTMLElement, citations: CitationRef[], onReferenceClick: (reference: EvidenceReference) => void): void {
@@ -1044,6 +1077,17 @@ function createMarkdownRenderer(): MarkdownIt {
   };
 
   return renderer;
+}
+
+function getMessageBubbleStateClasses(message: ChatMessage): string[] {
+  const classes: string[] = [];
+  if (message.status === "pending") {
+    classes.push("zpr-message-streaming");
+  }
+  if (message.role === "assistant" && message.status === "pending" && !message.markdown.trim()) {
+    classes.push("zpr-message-thinking");
+  }
+  return classes;
 }
 
 function renderMathToString(value: string, displayMode: boolean): string {

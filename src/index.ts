@@ -7,10 +7,11 @@ import {
   prepareInitialChatStream,
   removePendingAssistantMessage
 } from "./background/orchestrator.ts";
-import { deleteSavedChatSessionForAttachment, loadSavedChatSessionForAttachment, saveChatSessionForAttachment } from "./background/persistence.ts";
+import { loadSavedChatSessionForAttachment, saveChatSessionForAttachment } from "./background/persistence.ts";
 import { DEFAULT_SETTINGS, getAllSettings, getSidebarWidth, setSetting, type PluginSettings } from "./background/settings-manager.ts";
 import { getCurrentStrings } from "./i18n/index.ts";
 import { initPreferencesDocument } from "./preferences/controller.ts";
+import { applySessionSaveFailure } from "./runtime/session-persistence-state.ts";
 import { clampSidebarWidth, createInitialReaderState, shouldApplyRequestResult, shouldRecreatePanelHost, startRequest, type PanelHostMeta } from "./runtime/reader-runtime.ts";
 import { createReaderPanelHost, type ReaderPanelHost } from "./reader/panel.ts";
 import { shouldEnableAskAI, toReaderLocation } from "./reader/reference-utils.ts";
@@ -42,6 +43,7 @@ interface ReaderState {
   sendingFollowup: boolean;
   retryingTurnId: string | null;
   panelError: string | null;
+  notice: string | null;
   failedTurn: FailedTurnState | null;
   requestToken: number;
 }
@@ -202,6 +204,7 @@ async function startFreshSession(reader: _ZoteroTypes.ReaderInstance, followupQu
   state.sendingFollowup = false;
   state.retryingTurnId = null;
   state.panelError = null;
+  state.notice = null;
   state.failedTurn = null;
   renderPanelState(reader, host, state);
   const requestToken = startRequest(state);
@@ -230,7 +233,21 @@ async function startFreshSession(reader: _ZoteroTypes.ReaderInstance, followupQu
     if (!session) {
       return;
     }
-    await saveChatSessionForAttachment(attachment, session);
+    try {
+      await saveChatSessionForAttachment(attachment, session);
+      state.notice = null;
+    } catch (saveError) {
+      const resolved = applySessionSaveFailure({
+        session,
+        saveError: saveError instanceof Error ? saveError : String(saveError),
+        notice: getCurrentStrings().panel.saveFailedNotice
+      });
+      state.session = resolved.session;
+      state.panelError = resolved.panelError;
+      state.notice = resolved.notice;
+      log(`Chat session save failed: ${resolved.saveErrorMessage}`);
+      renderPanelState(reader, host, state);
+    }
     if (followupQuestion) {
       await submitFollowup(reader, followupQuestion);
     }
@@ -286,16 +303,11 @@ function renderPanelState(reader: _ZoteroTypes.ReaderInstance, host: ReaderPanel
     onSubmit: (question) => {
       void submitFollowup(reader, question);
     },
-    onRegenerate: () => {
-      void regenerateChatSession(reader);
-    },
-    onClear: () => {
-      void clearChatSession(reader);
-    },
     onRetryFailedTurn: () => {
       void retryFailedTurn(reader);
     }
   }, {
+    notice: state.notice || undefined,
     isBusy: state.sendingFollowup || Boolean(state.retryingTurnId),
     failedTurn: state.failedTurn
       ? {
@@ -326,6 +338,7 @@ async function submitFollowup(reader: _ZoteroTypes.ReaderInstance, question: str
   const userMessageId = prepared.session.messages.findLast((message) => message.role === "user")?.id || "";
   state.session = prepared.session;
   state.sendingFollowup = true;
+  state.notice = null;
   state.failedTurn = null;
   state.panelError = null;
   renderPanelState(reader, host, state);
@@ -351,7 +364,21 @@ async function submitFollowup(reader: _ZoteroTypes.ReaderInstance, question: str
     state.session = next;
     state.sendingFollowup = false;
     renderPanelState(reader, host, state);
-    await saveChatSessionForAttachment(attachment, next);
+    try {
+      await saveChatSessionForAttachment(attachment, next);
+      state.notice = null;
+    } catch (saveError) {
+      const resolved = applySessionSaveFailure({
+        session: next,
+        saveError: saveError instanceof Error ? saveError : String(saveError),
+        notice: getCurrentStrings().panel.saveFailedNotice
+      });
+      state.session = resolved.session;
+      state.panelError = resolved.panelError;
+      state.notice = resolved.notice;
+      log(`Chat session save failed: ${resolved.saveErrorMessage}`);
+    }
+    renderPanelState(reader, host, state);
   } catch (error) {
     if (!shouldApplyAsyncResult(reader, state, requestToken, hostEntry)) {
       return;
@@ -385,6 +412,7 @@ async function retryFailedTurn(reader: _ZoteroTypes.ReaderInstance): Promise<voi
 
   const failedTurn = state.failedTurn;
   state.retryingTurnId = failedTurn.userMessageId;
+  state.notice = null;
   state.failedTurn = null;
   renderPanelState(reader, host, state);
   const requestToken = startRequest(state);
@@ -414,7 +442,21 @@ async function retryFailedTurn(reader: _ZoteroTypes.ReaderInstance): Promise<voi
     state.session = next;
     state.retryingTurnId = null;
     renderPanelState(reader, host, state);
-    await saveChatSessionForAttachment(attachment, next);
+    try {
+      await saveChatSessionForAttachment(attachment, next);
+      state.notice = null;
+    } catch (saveError) {
+      const resolved = applySessionSaveFailure({
+        session: next,
+        saveError: saveError instanceof Error ? saveError : String(saveError),
+        notice: getCurrentStrings().panel.saveFailedNotice
+      });
+      state.session = resolved.session;
+      state.panelError = resolved.panelError;
+      state.notice = resolved.notice;
+      log(`Chat session save failed: ${resolved.saveErrorMessage}`);
+    }
+    renderPanelState(reader, host, state);
   } catch (error) {
     if (!shouldApplyAsyncResult(reader, state, requestToken, hostEntry)) {
       return;
@@ -485,75 +527,6 @@ async function consumeStreamIntoState(
   }
 
   return session;
-}
-
-async function clearChatSession(reader: _ZoteroTypes.ReaderInstance): Promise<void> {
-  const attachment = getAttachmentForReader(reader);
-  if (!attachment) {
-    return;
-  }
-
-  const state = getOrCreateReaderState(reader);
-  const host = panelHosts.get(getReaderKey(reader))?.host;
-  if (!host || state.bootstrapping || state.sendingFollowup || state.retryingTurnId) {
-    return;
-  }
-
-  const strings = getCurrentStrings();
-  if (!confirmDestructiveAction(reader, strings.panel.clearConfirm)) {
-    return;
-  }
-
-  await deleteSavedChatSessionForAttachment(attachment);
-  state.session = null;
-  state.bootstrapping = false;
-  state.sendingFollowup = false;
-  state.retryingTurnId = null;
-  state.panelError = null;
-  state.failedTurn = null;
-  renderPanelState(reader, host, state);
-}
-
-async function regenerateChatSession(reader: _ZoteroTypes.ReaderInstance): Promise<void> {
-  const attachment = getAttachmentForReader(reader);
-  if (!attachment) {
-    return;
-  }
-
-  const state = getOrCreateReaderState(reader);
-  if (state.bootstrapping || state.sendingFollowup || state.retryingTurnId) {
-    return;
-  }
-
-  const strings = getCurrentStrings();
-  if (!confirmDestructiveAction(reader, strings.panel.regenerateConfirm)) {
-    return;
-  }
-
-  await deleteSavedChatSessionForAttachment(attachment);
-  state.session = null;
-  state.failedTurn = null;
-  state.panelError = null;
-  await startFreshSession(reader);
-}
-
-function confirmDestructiveAction(reader: _ZoteroTypes.ReaderInstance, message: string): boolean {
-  const title = getCurrentStrings().panel.title;
-  const promptWindow = reader._iframeWindow || resolveMainWindow();
-  try {
-    if (Services?.prompt?.confirm) {
-      return Services.prompt.confirm(promptWindow, title, message);
-    }
-  } catch {
-    // Fallback to DOM confirm below.
-  }
-
-  try {
-    const confirmFn = promptWindow?.confirm || globalThis.confirm;
-    return confirmFn ? confirmFn(message) : false;
-  } catch {
-    return false;
-  }
 }
 
 function navigateToReference(reader: _ZoteroTypes.ReaderInstance, reference: EvidenceReference): void {
@@ -645,6 +618,7 @@ function getOrCreateReaderState(reader: _ZoteroTypes.ReaderInstance): ReaderStat
     sendingFollowup: false,
     retryingTurnId: null,
     panelError: null,
+    notice: null,
     failedTurn: null,
     ...createInitialReaderState()
   };

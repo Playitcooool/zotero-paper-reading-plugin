@@ -39,6 +39,7 @@ export interface PluginStrings {
     close: string;
     jumpToLatest: string;
     requestTimedOut: string;
+    saveFailedNotice: string;
     clearConfirm: string;
     regenerateConfirm: string;
     suggestedQuestions: string[];
@@ -116,6 +117,7 @@ const ZH_CN: PluginStrings = {
     close: "关闭面板",
     jumpToLatest: "跳到最新内容",
     requestTimedOut: "请求在 {ms} 毫秒后超时，请重试。",
+    saveFailedNotice: "内容已生成，但自动保存失败。",
     clearConfirm: "这会删除当前论文已保存的聊天记录。确定继续吗？",
     regenerateConfirm: "这会丢弃当前会话并重新生成首条论文解读。确定继续吗？",
     suggestedQuestions: [
@@ -206,6 +208,7 @@ const EN_US: PluginStrings = {
     close: "Close panel",
     jumpToLatest: "Jump to latest",
     requestTimedOut: "Request timed out after {ms} ms. Please try again.",
+    saveFailedNotice: "Content was generated, but auto-save failed.",
     clearConfirm: "This will delete the saved chat for this paper. Continue?",
     regenerateConfirm: "This will discard the current chat and regenerate the first paper reading. Continue?",
     suggestedQuestions: [

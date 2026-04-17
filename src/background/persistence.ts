@@ -21,12 +21,13 @@ export function buildAnalysisNoteHtml(result: AnalysisResult): string {
   return `${ANALYSIS_MARKER_PREFIX}${encoded}${MARKER_SUFFIX}<h1>${escapeHtml(result.meta.title || strings.appName)}</h1>${sectionHtml}${referenceHtml}`;
 }
 
-export function buildChatNoteHtml(session: ChatSession): string {
+export function buildChatNoteHtml(session: ChatSession, sourceContext?: string): string {
   const encoded = encodePayload(session);
   const transcript = session.messages
     .map((message) => `<h2>${escapeHtml(message.role)}</h2><p>${escapeHtml(message.markdown).replace(/\n/g, "<br/>")}</p>`)
     .join("");
-  return `${CHAT_MARKER_PREFIX}${encoded}${MARKER_SUFFIX}<h1>${escapeHtml(session.paper.title || getCurrentStrings().appName)}</h1>${transcript}`;
+  const sourceHtml = sourceContext ? `<p>${escapeHtml(sourceContext)}</p>` : "";
+  return `${CHAT_MARKER_PREFIX}${encoded}${MARKER_SUFFIX}<h1>${escapeHtml(session.paper.title || getCurrentStrings().appName)}</h1>${sourceHtml}${transcript}`;
 }
 
 export function parseAnalysisNoteHtml(noteHtml: string): AnalysisResult | null {
@@ -80,14 +81,20 @@ export async function saveAnalysisForAttachment(attachment: Zotero.Item, result:
 
   const note = new Zotero.Item("note");
   note.libraryID = attachment.libraryID;
-  note.parentItemID = attachment.id;
+  const parentItemID = resolveRegularParentItemID(attachment);
+  if (parentItemID) {
+    note.parentItemID = parentItemID;
+  }
   note.setNote(html);
   await note.saveTx();
   return note.id;
 }
 
 export async function saveChatSessionForAttachment(attachment: Zotero.Item, session: ChatSession): Promise<number> {
-  const html = buildChatNoteHtml(session);
+  const sourceContext = resolveRegularParentItemID(attachment)
+    ? undefined
+    : buildStandaloneSourceContext(attachment);
+  const html = buildChatNoteHtml(session, sourceContext);
   const notes = await getAttachmentNotes(attachment);
   const existing = findExistingChatNote(notes) || findExistingAnalysisNote(notes);
 
@@ -99,7 +106,10 @@ export async function saveChatSessionForAttachment(attachment: Zotero.Item, sess
 
   const note = new Zotero.Item("note");
   note.libraryID = attachment.libraryID;
-  note.parentItemID = attachment.id;
+  const parentItemID = resolveRegularParentItemID(attachment);
+  if (parentItemID) {
+    note.parentItemID = parentItemID;
+  }
   note.setNote(html);
   await note.saveTx();
   return note.id;
@@ -173,6 +183,19 @@ function analysisResultToMarkdown(result: AnalysisResult): string {
   const markdown = parts.join("\n\n");
   const citations = extractCitationRefsFromMarkdown(markdown);
   return citations.length ? markdown : markdown;
+}
+
+function resolveRegularParentItemID(attachment: Zotero.Item): number | null {
+  const parent = attachment.parentItem as (Zotero.Item & { isRegularItem?(): boolean }) | null | undefined;
+  if (parent?.id && parent.isRegularItem?.()) {
+    return parent.id;
+  }
+  return null;
+}
+
+function buildStandaloneSourceContext(attachment: Zotero.Item): string {
+  const attachmentTitle = attachment.getField?.("title") || getCurrentStrings().panel.untitledPaper;
+  return `Source attachment: ${attachmentTitle}`;
 }
 
 function parseMarkedPayload(noteHtml: string, markerPrefix: string): unknown | null {

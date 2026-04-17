@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildPanelToolbarActions,
+  buildPendingIndicatorMarkup,
+  buildVisibleMessageMeta,
+  getSidebarStyles,
+  shouldShowMessageCopyButton,
   buildVisibleSessionMeta,
   buildSessionPlainText,
   extractCitationRefsFromMarkdown,
@@ -108,6 +113,58 @@ test("buildVisibleSessionMeta keeps only title and year for the live panel", () 
     title: "Sample Paper",
     detail: "2026"
   });
+});
+
+test("buildPanelToolbarActions removes manual chat management actions", () => {
+  assert.deepEqual(buildPanelToolbarActions(getStringsForLocale("en-US")), []);
+});
+
+test("buildVisibleMessageMeta hides assistant labels and keeps the user label", () => {
+  assert.deepEqual(buildVisibleMessageMeta(sampleSession.messages[0], getStringsForLocale("en-US")), {
+    roleLabel: "",
+    showRole: false
+  });
+  assert.deepEqual(buildVisibleMessageMeta({
+    id: "u1",
+    role: "user",
+    markdown: "Question",
+    createdAt: "2026-04-16T10:01:00.000Z",
+    citations: []
+  }, getStringsForLocale("en-US")), {
+    roleLabel: "You",
+    showRole: true
+  });
+});
+
+test("shouldShowMessageCopyButton only shows copy for completed assistant messages", () => {
+  assert.equal(shouldShowMessageCopyButton(sampleSession.messages[0]), true);
+  assert.equal(shouldShowMessageCopyButton({
+    ...sampleSession.messages[0],
+    status: "pending"
+  }), false);
+  assert.equal(shouldShowMessageCopyButton({
+    id: "u1",
+    role: "user",
+    markdown: "Question",
+    createdAt: "2026-04-16T10:01:00.000Z",
+    citations: []
+  }), false);
+});
+
+test("buildPendingIndicatorMarkup uses spinner markup for empty thinking state", () => {
+  const html = buildPendingIndicatorMarkup(getStringsForLocale("en-US"));
+  assert.match(html, /zpr-spinner/);
+  assert.match(html, /Thinking/);
+});
+
+test("getSidebarStyles includes edge-resize, unified composer colors, and streaming animation hooks", () => {
+  const css = getSidebarStyles();
+  assert.match(css, /\.zpr-sidebar-resize/);
+  assert.match(css, /position:\s*absolute/);
+  assert.match(css, /\.zpr-composer-input/);
+  assert.match(css, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.95\)/);
+  assert.match(css, /@keyframes zpr-spin/);
+  assert.match(css, /@keyframes zpr-stream-pulse/);
 });
 
 test("buildSessionPlainText includes the conversation transcript", () => {

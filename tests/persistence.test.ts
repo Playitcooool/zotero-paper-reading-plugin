@@ -8,7 +8,8 @@ import {
   deleteSavedChatSessionForAttachment,
   findExistingAnalysisNote,
   parseAnalysisNoteHtml,
-  parseChatNoteHtml
+  parseChatNoteHtml,
+  saveChatSessionForAttachment
 } from "../src/background/persistence.ts";
 import type { AnalysisResult, ChatSession } from "../src/background/types.ts";
 
@@ -177,6 +178,152 @@ test("deleteSavedChatSessionForAttachment falls back to deleting a legacy analys
 
     assert.equal(removed, true);
     assert.deepEqual(deleted, [1]);
+  } finally {
+    (globalThis as { Zotero?: unknown }).Zotero = originalZotero;
+  }
+});
+
+test("saveChatSessionForAttachment creates a child note under a regular parent item", async () => {
+  const session: ChatSession = {
+    paper: {
+      itemID: 7,
+      title: "Sample Paper",
+      authors: ["Jane Doe"],
+      year: "2026"
+    },
+    backendLabel: "OpenAI Compatible",
+    model: "gpt-5-mini",
+    createdAt: "2026-04-16T10:00:00.000Z",
+    updatedAt: "2026-04-16T10:05:00.000Z",
+    messages: []
+  };
+
+  const created: Array<{ libraryID: number; parentItemID?: number; note: string }> = [];
+  const originalZotero = (globalThis as { Zotero?: unknown }).Zotero;
+
+  class FakeNote {
+    id = 99;
+    libraryID = 0;
+    parentItemID?: number;
+    note = "";
+
+    setNote(value: string): void {
+      this.note = value;
+    }
+
+    async saveTx(): Promise<number> {
+      created.push({
+        libraryID: this.libraryID,
+        parentItemID: this.parentItemID,
+        note: this.note
+      });
+      return this.id;
+    }
+  }
+
+  (globalThis as { Zotero?: unknown }).Zotero = {
+    Item: FakeNote,
+    Items: {
+      get(): Array<never> {
+        return [];
+      }
+    }
+  };
+
+  try {
+    const id = await saveChatSessionForAttachment({
+      id: 7,
+      libraryID: 11,
+      parentItem: {
+        id: 42,
+        isRegularItem(): boolean {
+          return true;
+        }
+      },
+      getNotes(): number[] {
+        return [];
+      }
+    } as unknown as Zotero.Item, session);
+
+    assert.equal(id, 99);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].libraryID, 11);
+    assert.equal(created[0].parentItemID, 42);
+  } finally {
+    (globalThis as { Zotero?: unknown }).Zotero = originalZotero;
+  }
+});
+
+test("saveChatSessionForAttachment falls back to a standalone note when no regular parent item exists", async () => {
+  const session: ChatSession = {
+    paper: {
+      itemID: 7,
+      title: "Sample Paper",
+      authors: ["Jane Doe"],
+      year: "2026"
+    },
+    backendLabel: "OpenAI Compatible",
+    model: "gpt-5-mini",
+    createdAt: "2026-04-16T10:00:00.000Z",
+    updatedAt: "2026-04-16T10:05:00.000Z",
+    messages: []
+  };
+
+  const created: Array<{ libraryID: number; parentItemID?: number; note: string }> = [];
+  const originalZotero = (globalThis as { Zotero?: unknown }).Zotero;
+
+  class FakeNote {
+    id = 101;
+    libraryID = 0;
+    parentItemID?: number;
+    note = "";
+
+    setNote(value: string): void {
+      this.note = value;
+    }
+
+    async saveTx(): Promise<number> {
+      created.push({
+        libraryID: this.libraryID,
+        parentItemID: this.parentItemID,
+        note: this.note
+      });
+      return this.id;
+    }
+  }
+
+  (globalThis as { Zotero?: unknown }).Zotero = {
+    Item: FakeNote,
+    Items: {
+      get(): Array<never> {
+        return [];
+      }
+    }
+  };
+
+  try {
+    const id = await saveChatSessionForAttachment({
+      id: 7,
+      libraryID: 11,
+      parentItem: {
+        id: 42,
+        isRegularItem(): boolean {
+          return false;
+        }
+      },
+      getField(field: string): string {
+        return field === "title" ? "Attachment PDF" : "";
+      },
+      getNotes(): number[] {
+        return [];
+      }
+    } as unknown as Zotero.Item, session);
+
+    assert.equal(id, 101);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].libraryID, 11);
+    assert.equal(created[0].parentItemID, undefined);
+    assert.match(created[0].note, /Attachment PDF/);
   } finally {
     (globalThis as { Zotero?: unknown }).Zotero = originalZotero;
   }
