@@ -1,9 +1,20 @@
 import type { ChatMessage, ChatSession, CitationRef, EvidenceReference } from "../background/types.ts";
+import MarkdownIt from "markdown-it";
 import type { PluginStrings } from "../i18n/index.ts";
 import { getCurrentLocale } from "../i18n/index.ts";
+import { getResizedSidebarWidth, shouldAutoScrollTranscript } from "../runtime/reader-runtime.ts";
+
+const markdownRenderer = createMarkdownRenderer();
+
+export interface ReaderPanelChromeHandlers {
+  onClose: () => void;
+  onResize: (width: number) => void;
+}
 
 export interface ReaderPanelHost {
   mount(): boolean;
+  setHidden(hidden: boolean): void;
+  setWidth(width: number): void;
   showLoading(title: string, subtitle?: string): void;
   showEmpty(
     title?: string,
@@ -41,31 +52,45 @@ export function createReaderPanelHost(
   reader: _ZoteroTypes.ReaderInstance,
   sidebarWidth: number,
   mainWindow: Window | null,
-  strings: PluginStrings
+  strings: PluginStrings,
+  chromeHandlers: ReaderPanelChromeHandlers
 ): ReaderPanelHost {
   const nativeDoc = reader._iframeWindow?.document || null;
   if (nativeDoc) {
-    return new FixedSidebarHost(nativeDoc, sidebarWidth, true, strings);
+    return new FixedSidebarHost(nativeDoc, sidebarWidth, true, strings, chromeHandlers);
   }
   if (mainWindow?.document) {
-    return new FixedSidebarHost(mainWindow.document, sidebarWidth, false, strings);
+    return new FixedSidebarHost(mainWindow.document, sidebarWidth, false, strings, chromeHandlers);
   }
   return new NoopPanelHost();
 }
 
 class FixedSidebarHost implements ReaderPanelHost {
   private readonly doc: Document;
-  private readonly sidebarWidth: number;
   private readonly isReaderDoc: boolean;
   private readonly strings: PluginStrings;
+  private readonly chromeHandlers: ReaderPanelChromeHandlers;
+  private sidebarWidth: number;
   private root: HTMLDivElement | null = null;
   private content: HTMLDivElement | null = null;
+  private transcript: HTMLDivElement | null = null;
+  private jumpButton: HTMLButtonElement | null = null;
+  private autoScroll = true;
+  private lastManualScrollTop = 0;
+  private isHidden = false;
 
-  constructor(doc: Document, sidebarWidth: number, isReaderDoc: boolean, strings: PluginStrings) {
+  constructor(
+    doc: Document,
+    sidebarWidth: number,
+    isReaderDoc: boolean,
+    strings: PluginStrings,
+    chromeHandlers: ReaderPanelChromeHandlers
+  ) {
     this.doc = doc;
     this.sidebarWidth = sidebarWidth;
     this.isReaderDoc = isReaderDoc;
     this.strings = strings;
+    this.chromeHandlers = chromeHandlers;
   }
 
   mount(): boolean {
@@ -74,30 +99,48 @@ class FixedSidebarHost implements ReaderPanelHost {
       this.root = this.doc.createElement("div");
       this.root.id = "zpr-sidebar-root";
       this.root.innerHTML = `
+        <div class="zpr-sidebar-resize" data-zpr-action="resize" aria-hidden="true"></div>
         <div class="zpr-sidebar-card">
           <div class="zpr-sidebar-head">
-            <div>
+            <div class="zpr-sidebar-heading">
               <div class="zpr-sidebar-title">${escapeHtml(this.strings.panel.title)}</div>
               <div class="zpr-sidebar-subtitle">${escapeHtml(this.isReaderDoc ? this.strings.panel.inReaderSubtitle : this.strings.panel.fallbackSubtitle)}</div>
             </div>
+            <button type="button" class="zpr-close-button" data-zpr-action="close-panel" aria-label="${escapeHtml(this.strings.panel.close)}" title="${escapeHtml(this.strings.panel.close)}">×</button>
           </div>
           <div class="zpr-sidebar-content"></div>
         </div>
       `;
       this.content = this.root.querySelector(".zpr-sidebar-content") as HTMLDivElement;
       this.doc.documentElement.appendChild(this.root);
-      this.doc.documentElement.style.setProperty("--zpr-sidebar-width", `${this.sidebarWidth}px`);
-      if (this.isReaderDoc) {
-        this.doc.body?.style.setProperty("margin-right", `${this.sidebarWidth}px`);
-      }
+      this.root.querySelector('[data-zpr-action="close-panel"]')?.addEventListener("click", () => {
+        this.chromeHandlers.onClose();
+      });
+      this.bindResizeHandle();
+      this.syncLayout();
     }
     return true;
+  }
+
+  setHidden(hidden: boolean): void {
+    this.isHidden = hidden;
+    if (!this.mount() || !this.root) {
+      return;
+    }
+    this.root.classList.toggle("zpr-sidebar-hidden", hidden);
+    this.syncLayout();
+  }
+
+  setWidth(width: number): void {
+    this.sidebarWidth = width;
+    this.syncLayout();
   }
 
   showLoading(title: string, subtitle: string = this.strings.panel.loading): void {
     if (!this.mount() || !this.content) {
       return;
     }
+    this.resetTranscriptState();
     this.content.innerHTML = `
       <div class="zpr-loading">
         <div class="zpr-loading-badge">${escapeHtml(this.strings.panel.title)}</div>
@@ -120,6 +163,7 @@ class FixedSidebarHost implements ReaderPanelHost {
       return;
     }
 
+    this.resetTranscriptState();
     this.content.innerHTML = "";
     const empty = this.doc.createElement("div");
     empty.className = "zpr-empty";
@@ -174,6 +218,7 @@ class FixedSidebarHost implements ReaderPanelHost {
       return;
     }
 
+    const previousScrollTop = this.autoScroll ? 0 : this.lastManualScrollTop;
     this.content.innerHTML = "";
     const isBusy = Boolean(options.isBusy);
 
@@ -238,18 +283,7 @@ class FixedSidebarHost implements ReaderPanelHost {
       transcript.appendChild(this.buildMessageBubble(message, handlers.onReferenceClick));
     }
 
-    if (isBusy) {
-      const pending = this.doc.createElement("div");
-      pending.className = "zpr-message zpr-message-assistant";
-      pending.innerHTML = `
-        <div class="zpr-message-meta">
-          <div class="zpr-message-role">${escapeHtml(this.strings.panel.roleAssistant)}</div>
-          <div class="zpr-message-time">${escapeHtml(formatMessageTimestamp(new Date().toISOString()))}</div>
-        </div>
-        <div class="zpr-pending">${escapeHtml(this.strings.panel.thinking)}</div>
-      `;
-      transcript.appendChild(pending);
-    } else if (options.failedTurn) {
+    if (options.failedTurn) {
       const error = this.doc.createElement("div");
       error.className = "zpr-message zpr-message-assistant zpr-message-error";
       error.innerHTML = `
@@ -269,6 +303,19 @@ class FixedSidebarHost implements ReaderPanelHost {
     }
 
     this.content.appendChild(transcript);
+    this.transcript = transcript;
+
+    const jumpButton = this.doc.createElement("button");
+    jumpButton.type = "button";
+    jumpButton.className = "zpr-jump-button";
+    jumpButton.textContent = this.strings.panel.jumpToLatest;
+    jumpButton.addEventListener("click", () => {
+      this.autoScroll = true;
+      this.scrollTranscriptToBottom();
+      this.updateJumpButtonVisibility();
+    });
+    this.content.appendChild(jumpButton);
+    this.jumpButton = jumpButton;
 
     const composer = this.doc.createElement("form");
     composer.className = "zpr-composer";
@@ -300,7 +347,25 @@ class FixedSidebarHost implements ReaderPanelHost {
       }
     });
     this.content.appendChild(composer);
-    transcript.scrollTop = transcript.scrollHeight;
+
+    transcript.addEventListener("scroll", () => {
+      this.autoScroll = shouldAutoScrollTranscript({
+        scrollTop: transcript.scrollTop,
+        clientHeight: transcript.clientHeight,
+        scrollHeight: transcript.scrollHeight
+      });
+      if (!this.autoScroll) {
+        this.lastManualScrollTop = transcript.scrollTop;
+      }
+      this.updateJumpButtonVisibility();
+    });
+
+    if (this.autoScroll) {
+      this.scrollTranscriptToBottom();
+    } else {
+      transcript.scrollTop = previousScrollTop;
+    }
+    this.updateJumpButtonVisibility();
     if (!isBusy) {
       input?.focus();
     }
@@ -310,6 +375,7 @@ class FixedSidebarHost implements ReaderPanelHost {
     if (!this.mount() || !this.content) {
       return;
     }
+    this.resetTranscriptState();
     this.content.innerHTML = `<div class="zpr-error"><strong>${escapeHtml(this.strings.panel.analysisFailed)}</strong><span>${escapeHtml(message)}</span></div>`;
     if (onRetry) {
       const button = this.doc.createElement("button");
@@ -321,23 +387,27 @@ class FixedSidebarHost implements ReaderPanelHost {
   }
 
   dispose(): void {
-    if (this.isReaderDoc) {
-      this.doc.body?.style.removeProperty("margin-right");
-    }
+    this.doc.documentElement.style.removeProperty("--zpr-sidebar-width");
+    this.doc.body?.style.removeProperty("margin-right");
     this.root?.remove();
     this.root = null;
     this.content = null;
+    this.transcript = null;
+    this.jumpButton = null;
   }
 
   private buildMessageBubble(message: ChatMessage, onReferenceClick: (reference: EvidenceReference) => void): HTMLDivElement {
     const bubble = this.doc.createElement("div");
-    bubble.className = `zpr-message zpr-message-${message.role}`;
+    bubble.className = `zpr-message zpr-message-${message.role}${message.status === "pending" ? " zpr-message-streaming" : ""}`;
+    const bodyHtml = message.role === "assistant" && !message.markdown.trim() && message.status === "pending"
+      ? `<div class="zpr-pending">${escapeHtml(this.strings.panel.thinking)}</div>`
+      : `<div class="zpr-message-body">${renderMarkdownToHtml(message.markdown, message.citations)}</div>`;
     bubble.innerHTML = `
       <div class="zpr-message-meta">
         <div class="zpr-message-role">${escapeHtml(message.role === "user" ? this.strings.panel.roleUser : this.strings.panel.roleAssistant)}</div>
         <div class="zpr-message-time">${escapeHtml(formatMessageTimestamp(message.createdAt))}</div>
       </div>
-      <div class="zpr-message-body">${renderMarkdownToHtml(message.markdown, message.citations)}</div>
+      ${bodyHtml}
       ${message.role === "assistant" ? `<div class="zpr-message-actions"><button type="button" class="zpr-text-button" data-zpr-message-copy="${escapeHtml(message.id)}">${escapeHtml(this.strings.panel.copyMessage)}</button></div>` : ""}
     `;
     bindCitationClicks(bubble, message.citations, onReferenceClick);
@@ -351,6 +421,73 @@ class FixedSidebarHost implements ReaderPanelHost {
       });
     });
     return bubble;
+  }
+
+  private bindResizeHandle(): void {
+    const handle = this.root?.querySelector('[data-zpr-action="resize"]') as HTMLDivElement | null;
+    const view = this.doc.defaultView;
+    if (!handle || !view) {
+      return;
+    }
+
+    handle.addEventListener("pointerdown", (event) => {
+      const startWidth = this.sidebarWidth;
+      const startClientX = event.clientX;
+      const move = (moveEvent: PointerEvent) => {
+        const nextWidth = getResizedSidebarWidth({
+          startWidth,
+          startClientX,
+          currentClientX: moveEvent.clientX,
+          viewportWidth: view.innerWidth || this.doc.documentElement.clientWidth || 1280
+        });
+        this.setWidth(nextWidth);
+        this.chromeHandlers.onResize(nextWidth);
+      };
+      const stop = () => {
+        view.removeEventListener("pointermove", move);
+        view.removeEventListener("pointerup", stop);
+      };
+
+      handle.setPointerCapture?.(event.pointerId);
+      view.addEventListener("pointermove", move);
+      view.addEventListener("pointerup", stop, { once: true });
+    });
+  }
+
+  private resetTranscriptState(): void {
+    this.transcript = null;
+    this.jumpButton = null;
+    this.autoScroll = true;
+    this.lastManualScrollTop = 0;
+  }
+
+  private syncLayout(): void {
+    this.doc.documentElement.style.setProperty("--zpr-sidebar-width", `${this.sidebarWidth}px`);
+    if (this.root) {
+      this.root.style.display = this.isHidden ? "none" : "block";
+    }
+    if (this.isReaderDoc) {
+      if (this.isHidden) {
+        this.doc.body?.style.removeProperty("margin-right");
+      } else {
+        this.doc.body?.style.setProperty("margin-right", `${this.sidebarWidth}px`);
+      }
+    }
+  }
+
+  private scrollTranscriptToBottom(): void {
+    if (!this.transcript) {
+      return;
+    }
+    this.transcript.scrollTop = this.transcript.scrollHeight;
+  }
+
+  private updateJumpButtonVisibility(): void {
+    if (!this.jumpButton || !this.transcript) {
+      return;
+    }
+    const shouldShow = !this.autoScroll && this.transcript.scrollHeight > this.transcript.clientHeight;
+    this.jumpButton.classList.toggle("zpr-jump-button-visible", shouldShow);
   }
 
   private ensureStyles(): void {
@@ -367,13 +504,23 @@ class FixedSidebarHost implements ReaderPanelHost {
         width: var(--zpr-sidebar-width, 420px);
         height: 100vh;
         z-index: 2147483647;
-        padding: 14px;
+        padding: 12px 12px 12px 0;
         box-sizing: border-box;
         pointer-events: none;
+        display: flex;
+      }
+      .zpr-sidebar-hidden {
+        display: none;
+      }
+      .zpr-sidebar-resize {
+        width: 12px;
+        cursor: col-resize;
+        pointer-events: auto;
       }
       .zpr-sidebar-card {
         pointer-events: auto;
         height: 100%;
+        flex: 1;
         border-left: 1px solid rgba(148, 163, 184, 0.35);
         background: rgba(255, 255, 255, 0.96);
         color: #0f172a;
@@ -383,8 +530,15 @@ class FixedSidebarHost implements ReaderPanelHost {
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
       }
       .zpr-sidebar-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
         padding: 16px 18px 10px;
         border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+      }
+      .zpr-sidebar-heading {
+        min-width: 0;
       }
       .zpr-sidebar-title {
         font-size: 16px;
@@ -394,6 +548,16 @@ class FixedSidebarHost implements ReaderPanelHost {
         color: #64748b;
         font-size: 12px;
         margin-top: 4px;
+      }
+      .zpr-close-button {
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        color: #475569;
+        width: 28px;
+        height: 28px;
+        flex: none;
+        cursor: pointer;
       }
       .zpr-sidebar-content {
         flex: 1;
@@ -478,6 +642,19 @@ class FixedSidebarHost implements ReaderPanelHost {
       .zpr-message-error {
         background: #fff7ed;
         border-color: rgba(249, 115, 22, 0.24);
+      }
+      .zpr-message-streaming {
+        position: relative;
+      }
+      .zpr-message-streaming::after {
+        content: "";
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-left: 6px;
+        border-radius: 999px;
+        background: #2563eb;
+        opacity: 0.5;
       }
       .zpr-message-meta {
         display: flex;
@@ -569,6 +746,28 @@ class FixedSidebarHost implements ReaderPanelHost {
         padding-top: 12px;
         border-top: 1px solid rgba(226, 232, 240, 0.85);
       }
+      .zpr-jump-button {
+        align-self: center;
+        margin-top: -4px;
+        margin-bottom: 8px;
+        border: none;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #fff;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(6px);
+        transition: opacity 120ms ease, transform 120ms ease;
+      }
+      .zpr-jump-button-visible {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+      }
       .zpr-composer-input {
         min-height: 64px;
         border: 1px solid rgba(148, 163, 184, 0.45);
@@ -630,6 +829,8 @@ class FixedSidebarHost implements ReaderPanelHost {
 
 class NoopPanelHost implements ReaderPanelHost {
   mount(): boolean { return false; }
+  setHidden(): void {}
+  setWidth(): void {}
   showLoading(): void {}
   showEmpty(): void {}
   showChat(): void {}
@@ -674,84 +875,7 @@ export function extractCitationRefsFromMarkdown(markdown: string): CitationRef[]
 }
 
 export function renderMarkdownToHtml(markdown: string, citations: CitationRef[] = []): string {
-  const blocks: string[] = [];
-  const lines = markdown.replace(/\r/g, "").split("\n");
-  let index = 0;
-
-  while (index < lines.length) {
-    const line = lines[index];
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-
-    if (line.startsWith("```")) {
-      const codeLines: string[] = [];
-      index += 1;
-      while (index < lines.length && !lines[index].startsWith("```")) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      index += 1;
-      blocks.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      const level = heading[1].length;
-      blocks.push(`<h${level}>${applyInlineMarkdown(heading[2], citations)}</h${level}>`);
-      index += 1;
-      continue;
-    }
-
-    if (/^\d+\.\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\d+\.\s+/.test(lines[index])) {
-        items.push(`<li>${applyInlineMarkdown(lines[index].replace(/^\d+\.\s+/, ""), citations)}</li>`);
-        index += 1;
-      }
-      blocks.push(`<ol>${items.join("")}</ol>`);
-      continue;
-    }
-
-    if (/^[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^[-*]\s+/.test(lines[index])) {
-        items.push(`<li>${applyInlineMarkdown(lines[index].replace(/^[-*]\s+/, ""), citations)}</li>`);
-        index += 1;
-      }
-      blocks.push(`<ul>${items.join("")}</ul>`);
-      continue;
-    }
-
-    if (/^>\s?/.test(line)) {
-      const quoteLines: string[] = [];
-      while (index < lines.length && /^>\s?/.test(lines[index])) {
-        quoteLines.push(lines[index].replace(/^>\s?/, ""));
-        index += 1;
-      }
-      blocks.push(`<blockquote>${applyInlineMarkdown(quoteLines.join("<br/>"), citations)}</blockquote>`);
-      continue;
-    }
-
-    const paragraphLines: string[] = [];
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !/^(#{1,3})\s+/.test(lines[index]) &&
-      !/^\d+\.\s+/.test(lines[index]) &&
-      !/^[-*]\s+/.test(lines[index]) &&
-      !/^>\s?/.test(lines[index]) &&
-      !lines[index].startsWith("```")
-    ) {
-      paragraphLines.push(lines[index]);
-      index += 1;
-    }
-    blocks.push(`<p>${applyInlineMarkdown(paragraphLines.join("<br/>"), citations)}</p>`);
-  }
-
-  return blocks.join("");
+  return markdownRenderer.render(markdown, { citations }).trim();
 }
 
 export function buildSessionPlainText(session: ChatSession, strings: PluginStrings): string {
@@ -783,23 +907,6 @@ function bindCitationClicks(root: HTMLElement, citations: CitationRef[], onRefer
     }
     button.addEventListener("click", () => onReferenceClick(reference));
   }
-}
-
-function applyInlineMarkdown(text: string, citations: CitationRef[]): string {
-  let html = escapeHtml(text);
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  html = html.replace(/\[(Fig\.?\s*\d+|Figure\s+\d+|Table\s+\d+|p\.\s*\d+)\]/gi, (token) => {
-    const reference = citations.find((citation) => citation.sourceToken.toLowerCase() === token.toLowerCase());
-    if (!reference || reference.page <= 0) {
-      return `<span class="zpr-citation-label">${escapeHtml(token)}</span>`;
-    }
-    const safeToken = escapeHtml(reference.sourceToken);
-    return `<button type="button" class="zpr-citation-button" data-zpr-citation-token="${safeToken}">${escapeHtml(token)}</button>`;
-  });
-  return html;
 }
 
 function syncComposerDisabledState(
@@ -862,4 +969,48 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function createMarkdownRenderer(): MarkdownIt {
+  const renderer = new MarkdownIt({
+    html: false,
+    linkify: true,
+    breaks: false
+  });
+
+  renderer.renderer.rules.text = (
+    tokens: Array<{ content: string }>,
+    idx: number,
+    _options: unknown,
+    env: { citations?: CitationRef[] } | undefined
+  ) => {
+    const text = escapeHtml(tokens[idx].content);
+    const citations = ((env as { citations?: CitationRef[] } | undefined)?.citations) || [];
+    return replaceCitationTokens(text, citations);
+  };
+
+  renderer.renderer.rules.link_open = (
+    tokens: Array<{ attrSet(name: string, value: string): void }>,
+    idx: number,
+    options: unknown,
+    _env: unknown,
+    self: { renderToken(tokens: unknown, idx: number, options: unknown): string }
+  ) => {
+    const token = tokens[idx];
+    token.attrSet("target", "_blank");
+    token.attrSet("rel", "noreferrer");
+    return self.renderToken(tokens, idx, options);
+  };
+
+  return renderer;
+}
+
+function replaceCitationTokens(text: string, citations: CitationRef[]): string {
+  return text.replace(/\[(Fig\.?\s*\d+|Figure\s+\d+|Table\s+\d+|p\.\s*\d+)\]/gi, (token) => {
+    const reference = citations.find((citation) => citation.sourceToken.toLowerCase() === token.toLowerCase());
+    if (!reference || reference.page <= 0) {
+      return `<span class="zpr-citation-label">${escapeHtml(token)}</span>`;
+    }
+    return `<button type="button" class="zpr-citation-button" data-zpr-citation-token="${escapeHtml(reference.sourceToken)}">${escapeHtml(token)}</button>`;
+  });
 }

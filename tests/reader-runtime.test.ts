@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  clampSidebarWidth,
   createInitialReaderState,
+  getResizedSidebarWidth,
+  shouldAutoScrollTranscript,
   shouldApplyRequestResult,
   shouldRecreatePanelHost,
   startRequest
@@ -44,4 +47,39 @@ test("shouldRecreatePanelHost recreates hosts for disconnected documents or widt
     doc: connectedDoc,
     sidebarWidth: 360
   }, connectedDoc, 420), true);
+});
+
+test("clampSidebarWidth keeps the panel within fixed bounds and viewport slack", () => {
+  assert.equal(clampSidebarWidth(200, 1200), 320);
+  assert.equal(clampSidebarWidth(500, 1200), 500);
+  assert.equal(clampSidebarWidth(900, 1200), 720);
+  assert.equal(clampSidebarWidth(700, 900), 660);
+});
+
+test("shouldAutoScrollTranscript pauses when the user scrolls away from the bottom", () => {
+  assert.equal(shouldAutoScrollTranscript({
+    scrollTop: 580,
+    clientHeight: 200,
+    scrollHeight: 800
+  }), true);
+  assert.equal(shouldAutoScrollTranscript({
+    scrollTop: 300,
+    clientHeight: 200,
+    scrollHeight: 800
+  }), false);
+});
+
+test("getResizedSidebarWidth expands and shrinks from the right edge drag handle", () => {
+  assert.equal(getResizedSidebarWidth({
+    startWidth: 420,
+    startClientX: 1000,
+    currentClientX: 920,
+    viewportWidth: 1440
+  }), 500);
+  assert.equal(getResizedSidebarWidth({
+    startWidth: 420,
+    startClientX: 1000,
+    currentClientX: 1080,
+    viewportWidth: 1440
+  }), 340);
 });

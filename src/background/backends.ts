@@ -1,4 +1,4 @@
-import type { AnalysisBackend, ChatRequest, ChatResponse, LLMMessage } from "./types.ts";
+import type { AnalysisBackend, ChatRequest, ChatResponse, ChatStreamEvent, LLMMessage } from "./types.ts";
 import { getRequestTimeoutMs, type DirectProvider, type PluginSettings } from "./settings-manager.ts";
 import { getCurrentStrings } from "../i18n/index.ts";
 
@@ -16,18 +16,11 @@ export function createBackend(settings: PluginSettings, deps: BackendDeps = {}):
     throw new Error("Fetch is unavailable in this environment");
   }
 
-  if (settings.backendMode === "companion") {
-    return {
-      kind: "companion",
-      label: getCurrentStrings().backends.companion,
-      chat: async (request) => chatWithCompanion(settings, request, fetchImpl)
-    };
-  }
-
   return {
     kind: "direct",
     label: directProviderLabel(settings.directProvider),
-    chat: async (request) => chatDirect(settings, request, fetchImpl)
+    chat: async (request) => chatDirect(settings, request, fetchImpl),
+    chatStream: (request) => streamDirect(settings, request, fetchImpl)
   };
 }
 
@@ -105,11 +98,49 @@ export function buildProviderChatRequest(
   };
 }
 
+export function buildProviderStreamRequest(
+  provider: DirectProvider,
+  settings: PluginSettings,
+  messages: LLMMessage[]
+): RequestInit {
+  const request = buildProviderChatRequest(provider, settings, messages);
+  if (provider !== "openai-compatible" || typeof request.body !== "string") {
+    return request;
+  }
+
+  const payload = JSON.parse(request.body) as JsonValue;
+  return {
+    ...request,
+    body: JSON.stringify({
+      ...payload,
+      stream: true
+    })
+  };
+}
+
 async function chatDirect(
   settings: PluginSettings,
   request: ChatRequest,
   fetchImpl: typeof fetch
 ): Promise<ChatResponse> {
+  if (settings.directProvider === "openai-compatible") {
+    let markdown = "";
+    let model = settings.modelName;
+    for await (const event of streamDirect(settings, request, fetchImpl)) {
+      if (event.type === "metadata") {
+        model = event.model;
+      }
+      if (event.type === "delta") {
+        markdown += event.text;
+      }
+    }
+    return {
+      markdown: markdown.trim(),
+      backendLabel: directProviderLabel(settings.directProvider),
+      model
+    };
+  }
+
   const endpoint = resolveDirectEndpoint(settings.directProvider, settings.apiAddress, settings.modelName);
   const response = await fetchWithTimeout(
     fetchImpl,
@@ -129,27 +160,41 @@ async function chatDirect(
   };
 }
 
-async function chatWithCompanion(
+async function* streamDirect(
   settings: PluginSettings,
   request: ChatRequest,
   fetchImpl: typeof fetch
-): Promise<ChatResponse> {
-  const strings = getCurrentStrings();
-  const response = await fetchWithTimeout(fetchImpl, `${stripTrailingSlash(settings.companionUrl)}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request)
-  }, getRequestTimeoutMs(settings));
+): AsyncIterable<ChatStreamEvent> {
+  const endpoint = resolveDirectEndpoint(settings.directProvider, settings.apiAddress, settings.modelName);
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    endpoint,
+    buildProviderStreamRequest(settings.directProvider, settings, request.messages),
+    getRequestTimeoutMs(settings)
+  );
   if (!response.ok) {
-    throw new Error(await buildHttpErrorMessage(response, strings.backends.companion));
+    throw new Error(await buildHttpErrorMessage(response, directProviderLabel(settings.directProvider)));
   }
 
-  const data = await response.json() as unknown as JsonValue;
-  return {
-    markdown: typeof data.content === "string" ? data.content : "",
-    backendLabel: strings.backends.companion,
-    model: typeof data.model === "string" ? data.model : "companion"
-  };
+  if (settings.directProvider !== "openai-compatible") {
+    const data = await response.json() as unknown as JsonValue;
+    yield {
+      type: "metadata",
+      backendLabel: directProviderLabel(settings.directProvider),
+      model: settings.modelName
+    };
+    const text = extractDirectContent(settings.directProvider, data);
+    if (text) {
+      yield {
+        type: "delta",
+        text
+      };
+    }
+    yield { type: "done" };
+    return;
+  }
+
+  yield* streamOpenAICompatibleResponse(response, directProviderLabel(settings.directProvider), settings.modelName);
 }
 
 function extractDirectContent(provider: DirectProvider, data: JsonValue): string {
@@ -237,6 +282,156 @@ function directProviderLabel(provider: DirectProvider): string {
     default:
       return strings.backends.openaiCompatible;
   }
+}
+
+async function* streamOpenAICompatibleResponse(
+  response: Response,
+  backendLabel: string,
+  fallbackModel: string
+): AsyncIterable<ChatStreamEvent> {
+  if (!response.body) {
+    yield {
+      type: "metadata",
+      backendLabel,
+      model: fallbackModel
+    };
+    yield { type: "done" };
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let emittedMetadata = false;
+
+  for await (const chunk of readResponseBody(response.body)) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() || "";
+    for (const frame of frames) {
+      const events = parseOpenAIStreamFrame(frame, backendLabel, fallbackModel, emittedMetadata);
+      if (!events.length) {
+        continue;
+      }
+      if (events[0]?.type === "metadata") {
+        emittedMetadata = true;
+      }
+      for (const event of events) {
+        yield event;
+      }
+      if (events.some((event) => event.type === "done")) {
+        return;
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    const events = parseOpenAIStreamFrame(buffer, backendLabel, fallbackModel, emittedMetadata);
+    if (events[0]?.type === "metadata") {
+      emittedMetadata = true;
+    }
+    for (const event of events) {
+      yield event;
+    }
+    if (events.some((event) => event.type === "done")) {
+      return;
+    }
+  }
+
+  if (!emittedMetadata) {
+    yield {
+      type: "metadata",
+      backendLabel,
+      model: fallbackModel
+    };
+  }
+  yield { type: "done" };
+}
+
+async function* readResponseBody(body: ReadableStream<Uint8Array>): AsyncIterable<Uint8Array> {
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return;
+      }
+      if (value) {
+        yield value;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseOpenAIStreamFrame(
+  frame: string,
+  backendLabel: string,
+  fallbackModel: string,
+  emittedMetadata: boolean
+): ChatStreamEvent[] {
+  const payload = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .filter(Boolean)
+    .join("\n");
+  if (!payload) {
+    return [];
+  }
+  if (payload === "[DONE]") {
+    return [{ type: "done" }];
+  }
+
+  const data = JSON.parse(payload) as JsonValue;
+  const events: ChatStreamEvent[] = [];
+  if (!emittedMetadata) {
+    events.push({
+      type: "metadata",
+      backendLabel,
+      model: typeof data.model === "string" ? data.model : fallbackModel
+    });
+  }
+
+  const text = extractOpenAICompatibleDelta(data);
+  if (text) {
+    events.push({
+      type: "delta",
+      text
+    });
+  }
+  return events;
+}
+
+function extractOpenAICompatibleDelta(data: JsonValue): string {
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  return choices
+    .map((choice) => {
+      if (!choice || typeof choice !== "object") {
+        return "";
+      }
+      const delta = (choice as JsonValue).delta;
+      if (!delta || typeof delta !== "object") {
+        return "";
+      }
+      const content = (delta as JsonValue).content;
+      if (typeof content === "string") {
+        return content;
+      }
+      if (!Array.isArray(content)) {
+        return "";
+      }
+      return content
+        .map((part) => {
+          if (!part || typeof part !== "object") {
+            return "";
+          }
+          return typeof (part as JsonValue).text === "string" ? (part as JsonValue).text as string : "";
+        })
+        .join("");
+    })
+    .join("");
 }
 
 async function fetchWithTimeout(

@@ -13,12 +13,10 @@ export function initPreferencesDocument(
   }
 ): void {
   const fields: Array<keyof PluginSettings> = [
-    "backendMode",
     "directProvider",
     "apiAddress",
     "apiKey",
     "modelName",
-    "companionUrl",
     "requestTimeoutMs",
     "sidebarWidth"
   ];
@@ -34,30 +32,15 @@ export function initPreferencesDocument(
     }
   }
 
-  const syncVisibility = () => {
-    const mode = (doc.getElementById("backendMode") as HTMLSelectElement | null)?.value || deps.defaults.backendMode;
-    doc.querySelectorAll(".zpr-direct-only").forEach((node) => {
-      (node as HTMLElement).style.display = mode === "direct" ? "" : "none";
-    });
-    doc.querySelectorAll(".zpr-companion-only").forEach((node) => {
-      (node as HTMLElement).style.display = mode === "companion" ? "" : "none";
-    });
+  const syncSummary = () => {
     setText(doc, "zpr-mode-summary-title", deps.strings.settings.modeSummaryTitle);
-    setText(
-      doc,
-      "zpr-mode-summary-body",
-      mode === "companion"
-        ? deps.strings.settings.companionModeSummary
-        : deps.strings.settings.directModeSummary
-    );
+    setText(doc, "zpr-mode-summary-body", deps.strings.settings.directModeSummary);
   };
 
   const syncStaticCopy = () => {
     setText(doc, "zpr-language-title", deps.strings.settings.languageExperienceTitle);
     setText(doc, "zpr-language-body", deps.strings.settings.languageExperienceBody);
     setText(doc, "zpr-backend-title", deps.strings.settings.backendModeTitle);
-    setText(doc, "zpr-backend-mode-label", deps.strings.settings.backendModeLabel);
-    setText(doc, "zpr-backend-mode-help", deps.strings.settings.backendModeHelp);
     setText(doc, "zpr-provider-label", deps.strings.settings.directProviderLabel);
     setText(doc, "zpr-credentials-title", deps.strings.settings.credentialsTitle);
     setText(doc, "zpr-api-address-label", deps.strings.settings.apiAddressLabel);
@@ -66,20 +49,12 @@ export function initPreferencesDocument(
     setText(doc, "zpr-api-key-help", deps.strings.settings.apiKeyHelp);
     setText(doc, "zpr-model-name-label", deps.strings.settings.modelNameLabel);
     setText(doc, "zpr-model-name-help", deps.strings.settings.modelNameHelp);
-    setText(doc, "zpr-companion-url-label", deps.strings.settings.companionUrlLabel);
-    setText(doc, "zpr-companion-url-help", deps.strings.settings.companionUrlHelp);
     setText(doc, "zpr-advanced-title", deps.strings.settings.advancedTitle);
     setText(doc, "zpr-timeout-label", deps.strings.settings.requestTimeoutLabel);
     setText(doc, "zpr-timeout-help", deps.strings.settings.requestTimeoutHelp);
     setText(doc, "zpr-sidebar-width-label", deps.strings.settings.sidebarWidthLabel);
     setText(doc, "zpr-sidebar-width-help", deps.strings.settings.sidebarWidthHelp);
     setText(doc, "zpr-subtitle", deps.strings.settings.subtitle);
-
-    const backendMode = doc.getElementById("backendMode") as (HTMLSelectElement & { options?: ArrayLike<{ text: string }> }) | null;
-    if (backendMode?.options?.length) {
-      backendMode.options[0].text = deps.strings.settings.directModeOption;
-      backendMode.options[1].text = deps.strings.settings.companionModeOption;
-    }
 
     const provider = doc.getElementById("directProvider") as (HTMLSelectElement & { options?: ArrayLike<{ text: string }> }) | null;
     if (provider?.options?.length) {
@@ -119,7 +94,6 @@ export function initPreferencesDocument(
   if (!initializedDocs.has(doc)) {
     initializedDocs.add(doc);
 
-    (doc.getElementById("backendMode") as HTMLSelectElement | null)?.addEventListener("change", syncVisibility);
     doc.getElementById("toggleAdvancedBtn")?.addEventListener("click", () => {
       const advanced = doc.getElementById("advancedSettings") as HTMLElement | null;
       if (!advanced) {
@@ -158,13 +132,13 @@ export function initPreferencesDocument(
           input.value = deps.defaults[field];
         }
       }
-      syncVisibility();
+      syncSummary();
       flashStatus(status, deps.strings.settings.resetDone);
     });
   }
 
   syncStaticCopy();
-  syncVisibility();
+  syncSummary();
   syncAdvancedVisibility();
 }
 

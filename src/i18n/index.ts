@@ -36,6 +36,8 @@ export interface PluginStrings {
     clear: string;
     copyMessage: string;
     retryTurn: string;
+    close: string;
+    jumpToLatest: string;
     requestTimedOut: string;
     clearConfirm: string;
     regenerateConfirm: string;
@@ -46,8 +48,6 @@ export interface PluginStrings {
     languageExperienceTitle: string;
     languageExperienceBody: string;
     backendModeTitle: string;
-    backendModeLabel: string;
-    backendModeHelp: string;
     directProviderLabel: string;
     credentialsTitle: string;
     apiAddressLabel: string;
@@ -56,8 +56,6 @@ export interface PluginStrings {
     apiKeyHelp: string;
     modelNameLabel: string;
     modelNameHelp: string;
-    companionUrlLabel: string;
-    companionUrlHelp: string;
     advancedTitle: string;
     advancedToggleShow: string;
     advancedToggleHide: string;
@@ -70,17 +68,13 @@ export interface PluginStrings {
     saved: string;
     resetDone: string;
     invalidNumericReset: string;
-    directModeOption: string;
-    companionModeOption: string;
     modeSummaryTitle: string;
     directModeSummary: string;
-    companionModeSummary: string;
   };
   backends: {
     openaiCompatible: string;
     anthropic: string;
     google: string;
-    companion: string;
   };
   sections: Record<SectionId, string>;
 }
@@ -119,6 +113,8 @@ const ZH_CN: PluginStrings = {
     clear: "清空会话",
     copyMessage: "复制本条",
     retryTurn: "重试这一轮",
+    close: "关闭面板",
+    jumpToLatest: "跳到最新内容",
     requestTimedOut: "请求在 {ms} 毫秒后超时，请重试。",
     clearConfirm: "这会删除当前论文已保存的聊天记录。确定继续吗？",
     regenerateConfirm: "这会丢弃当前会话并重新生成首条论文解读。确定继续吗？",
@@ -132,19 +128,15 @@ const ZH_CN: PluginStrings = {
     subtitle: "为 Zotero PDF 阅读器提供可继续追问的论文聊天侧栏，并自动保存当前会话。",
     languageExperienceTitle: "语言与体验",
     languageExperienceBody: "界面和解读语言会自动跟随 Zotero 当前语言，在中文和英文之间切换。",
-    backendModeTitle: "后端选择",
-    backendModeLabel: "运行模式",
-    backendModeHelp: "选择由插件直接请求模型，或转发到本地 companion 服务。",
-    directProviderLabel: "直连协议",
+    backendModeTitle: "Provider 与凭据",
+    directProviderLabel: "Provider",
     credentialsTitle: "连接与凭据",
     apiAddressLabel: "API 地址",
-    apiAddressHelp: "通常只在自定义接口或私有部署时需要修改。",
+    apiAddressHelp: "填写当前 provider 的 API 地址，本地或远程部署都适用。",
     apiKeyLabel: "API Key",
     apiKeyHelp: "如果服务无需密钥，可以留空。",
     modelNameLabel: "模型名称",
     modelNameHelp: "建议使用支持长上下文和文档理解的模型。",
-    companionUrlLabel: "Companion 地址",
-    companionUrlHelp: "例如 http://127.0.0.1:8765，插件会调用 /chat。",
     advancedTitle: "高级设置",
     advancedToggleShow: "显示高级设置",
     advancedToggleHide: "隐藏高级设置",
@@ -157,17 +149,13 @@ const ZH_CN: PluginStrings = {
     saved: "已保存",
     resetDone: "已恢复默认值",
     invalidNumericReset: "部分数值无效，已自动恢复为安全默认值。",
-    directModeOption: "插件直连模型",
-    companionModeOption: "本地 companion 服务",
-    modeSummaryTitle: "当前模式建议",
-    directModeSummary: "直连模式下，通常只需要填写 API 地址、API Key 和模型名称即可开始使用。",
-    companionModeSummary: "Companion 模式下，只需确认本地服务已启动，并填写可访问的 Companion 地址。"
+    modeSummaryTitle: "当前连接建议",
+    directModeSummary: "通常只需要选择 provider，填写 API 地址、API Key 和模型名称即可开始使用。"
   },
   backends: {
     openaiCompatible: "OpenAI Compatible",
     anthropic: "Anthropic",
-    google: "Google Gemini",
-    companion: "Companion Service"
+    google: "Google Gemini"
   },
   sections: {
     thesis: "论文主旨",
@@ -215,6 +203,8 @@ const EN_US: PluginStrings = {
     clear: "Clear chat",
     copyMessage: "Copy message",
     retryTurn: "Retry turn",
+    close: "Close panel",
+    jumpToLatest: "Jump to latest",
     requestTimedOut: "Request timed out after {ms} ms. Please try again.",
     clearConfirm: "This will delete the saved chat for this paper. Continue?",
     regenerateConfirm: "This will discard the current chat and regenerate the first paper reading. Continue?",
@@ -228,19 +218,15 @@ const EN_US: PluginStrings = {
     subtitle: "Open a follow-up-friendly paper chat sidebar for Zotero PDFs and save the current session automatically.",
     languageExperienceTitle: "Language & experience",
     languageExperienceBody: "The interface and analysis language follow the current Zotero language automatically.",
-    backendModeTitle: "Backend selection",
-    backendModeLabel: "Run mode",
-    backendModeHelp: "Choose whether the plugin calls the model directly or delegates to a local companion service.",
-    directProviderLabel: "Direct provider",
+    backendModeTitle: "Provider & credentials",
+    directProviderLabel: "Provider",
     credentialsTitle: "Connection & credentials",
     apiAddressLabel: "API address",
-    apiAddressHelp: "Usually only needed for custom endpoints or self-hosted deployments.",
+    apiAddressHelp: "Enter the current provider API address. This works for both local and remote deployments.",
     apiKeyLabel: "API key",
     apiKeyHelp: "Leave empty if your endpoint does not require authentication.",
     modelNameLabel: "Model name",
     modelNameHelp: "Prefer a model with strong long-context document understanding.",
-    companionUrlLabel: "Companion URL",
-    companionUrlHelp: "For example http://127.0.0.1:8765. The plugin calls /chat.",
     advancedTitle: "Advanced settings",
     advancedToggleShow: "Show advanced settings",
     advancedToggleHide: "Hide advanced settings",
@@ -253,17 +239,13 @@ const EN_US: PluginStrings = {
     saved: "Saved",
     resetDone: "Reset to defaults",
     invalidNumericReset: "Some invalid numeric values were reset to safe defaults.",
-    directModeOption: "Plugin calls the model directly",
-    companionModeOption: "Local companion service",
-    modeSummaryTitle: "Current mode guidance",
-    directModeSummary: "In direct mode, you usually only need the API address, API key, and model name before you start.",
-    companionModeSummary: "In companion mode, make sure the local service is running and the Companion URL is reachable."
+    modeSummaryTitle: "Current connection guidance",
+    directModeSummary: "You usually only need the provider, API address, API key, and model name before you start."
   },
   backends: {
     openaiCompatible: "OpenAI Compatible",
     anthropic: "Anthropic",
-    google: "Google Gemini",
-    companion: "Companion Service"
+    google: "Google Gemini"
   },
   sections: {
     thesis: "Thesis",

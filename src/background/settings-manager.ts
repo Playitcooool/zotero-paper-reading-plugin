@@ -1,24 +1,19 @@
-export type BackendMode = "direct" | "companion";
 export type DirectProvider = "openai-compatible" | "anthropic" | "google";
 
 export interface PluginSettings {
-  backendMode: BackendMode;
   directProvider: DirectProvider;
   apiAddress: string;
   apiKey: string;
   modelName: string;
-  companionUrl: string;
   requestTimeoutMs: string;
   sidebarWidth: string;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
-  backendMode: "direct",
   directProvider: "openai-compatible",
   apiAddress: "https://api.openai.com/v1",
   apiKey: "",
   modelName: "gpt-4.1-mini",
-  companionUrl: "http://127.0.0.1:8765",
   requestTimeoutMs: "120000",
   sidebarWidth: "420"
 };
@@ -47,12 +42,10 @@ export function setSetting<K extends keyof PluginSettings>(key: K, value: Plugin
 
 export function getAllSettings(): PluginSettings {
   return {
-    backendMode: getSetting("backendMode"),
     directProvider: getSetting("directProvider"),
     apiAddress: getSetting("apiAddress"),
     apiKey: getSetting("apiKey"),
     modelName: getSetting("modelName"),
-    companionUrl: getSetting("companionUrl"),
     requestTimeoutMs: getSetting("requestTimeoutMs"),
     sidebarWidth: getSetting("sidebarWidth")
   };

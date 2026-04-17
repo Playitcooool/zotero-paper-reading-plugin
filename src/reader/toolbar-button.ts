@@ -17,21 +17,35 @@ export function ensureAskAIButtonStyles(doc: Document): void {
 
   const style = doc.createElement("style");
   style.id = "zpr-toolbar-button-style";
-  style.textContent = `
+  style.textContent = getAskAIButtonStyles();
+  doc.documentElement.appendChild(style);
+}
+
+export function getAskAIButtonStyles(): string {
+  return `
     #zpr-ask-ai-button {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 0;
       border-radius: 999px;
-      padding: 0 10px;
+      padding: 0 8px;
       min-height: 28px;
+      max-width: 32px;
+      overflow: hidden;
       border: 1px solid rgba(59, 130, 246, 0.22);
       background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.98));
       color: #0f172a;
       font-weight: 600;
+      transition: max-width 160ms ease, padding 160ms ease, gap 160ms ease, background 160ms ease;
     }
     #zpr-ask-ai-button:hover {
       background: linear-gradient(180deg, rgba(239,246,255,1), rgba(219,234,254,1));
+    }
+    #zpr-ask-ai-button:hover,
+    #zpr-ask-ai-button:focus-visible {
+      max-width: 120px;
+      gap: 6px;
+      padding: 0 10px;
     }
     #zpr-ask-ai-button .zpr-toolbar-icon {
       display: inline-flex;
@@ -51,9 +65,16 @@ export function ensureAskAIButtonStyles(doc: Document): void {
     }
     #zpr-ask-ai-button .zpr-toolbar-label {
       white-space: nowrap;
+      opacity: 0;
+      transform: translateX(-4px);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+    #zpr-ask-ai-button:hover .zpr-toolbar-label,
+    #zpr-ask-ai-button:focus-visible .zpr-toolbar-label {
+      opacity: 1;
+      transform: translateX(0);
     }
   `;
-  doc.documentElement.appendChild(style);
 }
 
 function escapeHtml(value: string): string {
