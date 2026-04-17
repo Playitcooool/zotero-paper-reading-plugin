@@ -1,5 +1,5 @@
 import type { AnalysisBackend, ChatRequest, ChatResponse, LLMMessage } from "./types.ts";
-import type { DirectProvider, PluginSettings } from "./settings-manager.ts";
+import { getRequestTimeoutMs, type DirectProvider, type PluginSettings } from "./settings-manager.ts";
 import { getCurrentStrings } from "../i18n/index.ts";
 
 export interface BackendDeps {
@@ -111,7 +111,12 @@ async function chatDirect(
   fetchImpl: typeof fetch
 ): Promise<ChatResponse> {
   const endpoint = resolveDirectEndpoint(settings.directProvider, settings.apiAddress, settings.modelName);
-  const response = await fetchImpl(endpoint, buildProviderChatRequest(settings.directProvider, settings, request.messages));
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    endpoint,
+    buildProviderChatRequest(settings.directProvider, settings, request.messages),
+    getRequestTimeoutMs(settings)
+  );
   if (!response.ok) {
     throw new Error(await buildHttpErrorMessage(response, directProviderLabel(settings.directProvider)));
   }
@@ -130,11 +135,11 @@ async function chatWithCompanion(
   fetchImpl: typeof fetch
 ): Promise<ChatResponse> {
   const strings = getCurrentStrings();
-  const response = await fetchImpl(`${stripTrailingSlash(settings.companionUrl)}/chat`, {
+  const response = await fetchWithTimeout(fetchImpl, `${stripTrailingSlash(settings.companionUrl)}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request)
-  });
+  }, getRequestTimeoutMs(settings));
   if (!response.ok) {
     throw new Error(await buildHttpErrorMessage(response, strings.backends.companion));
   }
@@ -231,5 +236,30 @@ function directProviderLabel(provider: DirectProvider): string {
       return strings.backends.google;
     default:
       return strings.backends.openaiCompatible;
+  }
+}
+
+async function fetchWithTimeout(
+  fetchImpl: typeof fetch,
+  input: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutMessage = getCurrentStrings().panel.requestTimedOut.replace("{ms}", String(timeoutMs));
+  const timeoutId = setTimeout(() => controller.abort(timeoutMessage), timeoutMs);
+
+  try {
+    return await fetchImpl(input, {
+      ...init,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

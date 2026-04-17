@@ -36,6 +36,7 @@ export interface PluginStrings {
     clear: string;
     copyMessage: string;
     retryTurn: string;
+    requestTimedOut: string;
     clearConfirm: string;
     regenerateConfirm: string;
     suggestedQuestions: string[];
@@ -118,6 +119,7 @@ const ZH_CN: PluginStrings = {
     clear: "清空会话",
     copyMessage: "复制本条",
     retryTurn: "重试这一轮",
+    requestTimedOut: "请求在 {ms} 毫秒后超时，请重试。",
     clearConfirm: "这会删除当前论文已保存的聊天记录。确定继续吗？",
     regenerateConfirm: "这会丢弃当前会话并重新生成首条论文解读。确定继续吗？",
     suggestedQuestions: [
@@ -213,6 +215,7 @@ const EN_US: PluginStrings = {
     clear: "Clear chat",
     copyMessage: "Copy message",
     retryTurn: "Retry turn",
+    requestTimedOut: "Request timed out after {ms} ms. Please try again.",
     clearConfirm: "This will delete the saved chat for this paper. Continue?",
     regenerateConfirm: "This will discard the current chat and regenerate the first paper reading. Continue?",
     suggestedQuestions: [

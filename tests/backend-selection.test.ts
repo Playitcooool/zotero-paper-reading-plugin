@@ -35,3 +35,79 @@ test("buildProviderChatRequest maps follow-up messages to openai-compatible payl
   assert.match(String(request.body), /"messages"/);
   assert.match(String(request.body), /Question/);
 });
+
+test("direct backend aborts requests when timeout elapses", async () => {
+  const settings: PluginSettings = {
+    ...DEFAULT_SETTINGS,
+    backendMode: "direct",
+    directProvider: "openai-compatible",
+    requestTimeoutMs: "1"
+  };
+
+  const backend = createBackend(settings, {
+    fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("signal missing"));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(new Error("Request timed out after 1 ms")), { once: true });
+    })
+  });
+
+  try {
+    await backend.chat({
+      paper: {
+        itemID: 1,
+        title: "Sample",
+        authors: ["Jane Doe"],
+        year: "2026",
+        attachmentText: "Paper body"
+      },
+      messages: [{ role: "user", content: "Question" }],
+      mode: "followup",
+      locale: "en-US"
+    });
+    assert.ok(false, "Expected request to time out");
+  } catch (error) {
+    assert.match(error instanceof Error ? error.message : String(error), /timed out/i);
+  }
+});
+
+test("companion backend aborts requests when timeout elapses", async () => {
+  const settings: PluginSettings = {
+    ...DEFAULT_SETTINGS,
+    backendMode: "companion",
+    companionUrl: "http://127.0.0.1:8765",
+    requestTimeoutMs: "1"
+  };
+
+  const backend = createBackend(settings, {
+    fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("signal missing"));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(new Error("Request timed out after 1 ms")), { once: true });
+    })
+  });
+
+  try {
+    await backend.chat({
+      paper: {
+        itemID: 1,
+        title: "Sample",
+        authors: ["Jane Doe"],
+        year: "2026",
+        attachmentText: "Paper body"
+      },
+      messages: [{ role: "user", content: "Question" }],
+      mode: "followup",
+      locale: "en-US"
+    });
+    assert.ok(false, "Expected request to time out");
+  } catch (error) {
+    assert.match(error instanceof Error ? error.message : String(error), /timed out/i);
+  }
+});

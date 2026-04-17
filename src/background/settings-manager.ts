@@ -57,3 +57,16 @@ export function getAllSettings(): PluginSettings {
     sidebarWidth: getSetting("sidebarWidth")
   };
 }
+
+export function parsePositiveIntegerSetting(value: string, fallback: number): number {
+  const numeric = Number.parseInt(value.trim(), 10);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+export function getRequestTimeoutMs(settings: PluginSettings): number {
+  return parsePositiveIntegerSetting(settings.requestTimeoutMs, Number.parseInt(DEFAULT_SETTINGS.requestTimeoutMs, 10));
+}
+
+export function getSidebarWidth(settings: PluginSettings): number {
+  return parsePositiveIntegerSetting(settings.sidebarWidth, Number.parseInt(DEFAULT_SETTINGS.sidebarWidth, 10));
+}
