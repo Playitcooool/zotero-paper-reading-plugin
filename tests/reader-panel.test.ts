@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildVisibleSessionMeta,
   buildSessionPlainText,
   extractCitationRefsFromMarkdown,
   getSuggestedQuestions,
@@ -80,11 +81,33 @@ test("renderMarkdownToHtml supports tables", () => {
   assert.match(html, /<td>1<\/td>/);
 });
 
+test("renderMarkdownToHtml renders inline and block math", () => {
+  const inlineHtml = renderMarkdownToHtml("Inline math $E=mc^2$ works.");
+  const blockHtml = renderMarkdownToHtml("\\[a^2 + b^2 = c^2\\]");
+
+  assert.match(inlineHtml, /katex/);
+  assert.match(blockHtml, /katex-display/);
+});
+
+test("renderMarkdownToHtml supports alternate latex delimiters and preserves code spans", () => {
+  const html = renderMarkdownToHtml("Math: \\(x+y\\). Code: `\\(x+y\\)`.");
+
+  assert.match(html, /katex/);
+  assert.match(html, /<code>\\\(x\+y\\\)<\/code>/);
+});
+
 test("renderMarkdownToHtml escapes raw html instead of rendering it", () => {
   const html = renderMarkdownToHtml("<script>alert(1)</script>");
 
   assert.ok(!html.includes("<script>"));
   assert.match(html, /&lt;script&gt;/);
+});
+
+test("buildVisibleSessionMeta keeps only title and year for the live panel", () => {
+  assert.deepEqual(buildVisibleSessionMeta(sampleSession, getStringsForLocale("en-US")), {
+    title: "Sample Paper",
+    detail: "2026"
+  });
 });
 
 test("buildSessionPlainText includes the conversation transcript", () => {

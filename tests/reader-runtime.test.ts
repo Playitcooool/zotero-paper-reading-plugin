@@ -50,10 +50,10 @@ test("shouldRecreatePanelHost recreates hosts for disconnected documents or widt
 });
 
 test("clampSidebarWidth keeps the panel within fixed bounds and viewport slack", () => {
-  assert.equal(clampSidebarWidth(200, 1200), 320);
+  assert.equal(clampSidebarWidth(200, 1200), 280);
   assert.equal(clampSidebarWidth(500, 1200), 500);
-  assert.equal(clampSidebarWidth(900, 1200), 720);
-  assert.equal(clampSidebarWidth(700, 900), 660);
+  assert.equal(clampSidebarWidth(1400, 1200), 1104);
+  assert.equal(clampSidebarWidth(900, 900), 804);
 });
 
 test("shouldAutoScrollTranscript pauses when the user scrolls away from the bottom", () => {

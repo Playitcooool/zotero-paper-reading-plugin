@@ -28,6 +28,8 @@
     "zotero-types": "^4.1.0-beta.3"
   },
   "dependencies": {
-    "markdown-it": "^14.1.1"
+    "katex": "^0.16.25",
+    "markdown-it": "^14.1.1",
+    "markdown-it-texmath": "^1.0.0"
   }
 }

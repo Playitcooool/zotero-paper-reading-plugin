@@ -11,7 +11,7 @@ import { deleteSavedChatSessionForAttachment, loadSavedChatSessionForAttachment,
 import { DEFAULT_SETTINGS, getAllSettings, getSidebarWidth, setSetting, type PluginSettings } from "./background/settings-manager.ts";
 import { getCurrentStrings } from "./i18n/index.ts";
 import { initPreferencesDocument } from "./preferences/controller.ts";
-import { createInitialReaderState, shouldApplyRequestResult, shouldRecreatePanelHost, startRequest, type PanelHostMeta } from "./runtime/reader-runtime.ts";
+import { clampSidebarWidth, createInitialReaderState, shouldApplyRequestResult, shouldRecreatePanelHost, startRequest, type PanelHostMeta } from "./runtime/reader-runtime.ts";
 import { createReaderPanelHost, type ReaderPanelHost } from "./reader/panel.ts";
 import { shouldEnableAskAI, toReaderLocation } from "./reader/reference-utils.ts";
 import { buildAskAIButtonMarkup, ensureAskAIButtonStyles } from "./reader/toolbar-button.ts";
@@ -159,8 +159,8 @@ async function openChatPanel(reader: _ZoteroTypes.ReaderInstance): Promise<void>
   cleanupReaderRuntime(reader);
   const strings = getCurrentStrings();
   const settings = getAllSettings();
-  const sidebarWidth = getSidebarWidth(settings);
   const mainWindow = resolveMainWindow();
+  const sidebarWidth = resolveSidebarWidthForDocument(getSidebarWidth(settings), reader._iframeWindow?.document || mainWindow?.document || null);
   const hostEntry = getOrCreatePanelHost(reader, sidebarWidth, mainWindow, strings);
   const host = hostEntry.host;
   const state = getOrCreateReaderState(reader);
@@ -578,7 +578,8 @@ function getOrCreatePanelHost(
   const key = getReaderKey(reader);
   const existing = panelHosts.get(key);
   const doc = resolvePanelDocument(reader, mainWindow);
-  const createHost = () => createReaderPanelHost(reader, sidebarWidth, mainWindow, strings, {
+  const resolvedSidebarWidth = resolveSidebarWidthForDocument(sidebarWidth, doc);
+  const createHost = () => createReaderPanelHost(reader, resolvedSidebarWidth, mainWindow, strings, {
     onClose: () => {
       const state = panelState.get(key);
       if (!state) {
@@ -591,13 +592,14 @@ function getOrCreatePanelHost(
       }
     },
     onResize: (width: number) => {
-      setSetting("sidebarWidth", String(width) as PluginSettings["sidebarWidth"]);
+      const safeWidth = resolveSidebarWidthForDocument(width, doc);
+      setSetting("sidebarWidth", String(safeWidth) as PluginSettings["sidebarWidth"]);
       const entry = panelHosts.get(key);
       if (!entry) {
         return;
       }
-      entry.sidebarWidth = width;
-      entry.host.setWidth(width);
+      entry.sidebarWidth = safeWidth;
+      entry.host.setWidth(safeWidth);
     }
   });
 
@@ -607,12 +609,12 @@ function getOrCreatePanelHost(
     return {
       host,
       doc: (reader._iframeWindow?.document || mainWindow?.document) as Document,
-      sidebarWidth
+      sidebarWidth: resolvedSidebarWidth
     };
   }
 
-  if (existing && !shouldRecreatePanelHost(existing, doc, sidebarWidth)) {
-    existing.host.setWidth(sidebarWidth);
+  if (existing && !shouldRecreatePanelHost(existing, doc, resolvedSidebarWidth)) {
+    existing.host.setWidth(resolvedSidebarWidth);
     return existing;
   }
 
@@ -624,7 +626,7 @@ function getOrCreatePanelHost(
 
   const host = createHost();
   host.mount();
-  const entry: PanelHostEntry = { host, doc, sidebarWidth };
+  const entry: PanelHostEntry = { host, doc, sidebarWidth: resolvedSidebarWidth };
   panelHosts.set(key, entry);
   return entry;
 }
@@ -664,6 +666,11 @@ function resolveMainWindow(): Window | null {
 
 function resolvePanelDocument(reader: _ZoteroTypes.ReaderInstance, mainWindow: Window | null): Document | null {
   return reader._iframeWindow?.document || mainWindow?.document || null;
+}
+
+function resolveSidebarWidthForDocument(sidebarWidth: number, doc: Document | null): number {
+  const viewportWidth = doc?.defaultView?.innerWidth || doc?.documentElement?.clientWidth || 1280;
+  return clampSidebarWidth(sidebarWidth, viewportWidth);
 }
 
 function cleanupReaderRuntime(reader: _ZoteroTypes.ReaderInstance): void {

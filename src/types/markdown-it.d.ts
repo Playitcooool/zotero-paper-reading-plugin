@@ -10,6 +10,12 @@ declare module "markdown-it/dist/index.cjs.js" {
       rules: Record<string, (...args: any[]) => string>;
     };
 
+    use(plugin: (...args: any[]) => unknown, ...params: any[]): this;
     render(markdown: string, env?: unknown): string;
   }
+}
+
+declare module "markdown-it-texmath" {
+  const texmath: (...args: any[]) => unknown;
+  export default texmath;
 }

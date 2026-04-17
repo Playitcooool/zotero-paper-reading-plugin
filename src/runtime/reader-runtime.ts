@@ -13,9 +13,8 @@ export interface ScrollMetrics {
   scrollHeight: number;
 }
 
-const MIN_SIDEBAR_WIDTH = 320;
-const MAX_SIDEBAR_WIDTH = 720;
-const VIEWPORT_SLACK = 240;
+const MIN_SIDEBAR_WIDTH = 280;
+const VIEWPORT_SLACK = 96;
 const AUTO_SCROLL_THRESHOLD = 32;
 
 export function createInitialReaderState(): ReaderRequestState {
@@ -55,8 +54,7 @@ export function shouldRecreatePanelHost(
 
 export function clampSidebarWidth(width: number, viewportWidth: number): number {
   const viewportMax = Math.max(MIN_SIDEBAR_WIDTH, viewportWidth - VIEWPORT_SLACK);
-  const maxWidth = Math.min(MAX_SIDEBAR_WIDTH, viewportMax);
-  return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), maxWidth);
+  return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), viewportMax);
 }
 
 export function getResizedSidebarWidth(args: {

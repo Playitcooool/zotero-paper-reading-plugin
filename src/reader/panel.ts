@@ -1,5 +1,7 @@
 import type { ChatMessage, ChatSession, CitationRef, EvidenceReference } from "../background/types.ts";
+import katex from "katex";
 import MarkdownIt from "markdown-it/dist/index.cjs.js";
+import texmath from "markdown-it-texmath";
 import type { PluginStrings } from "../i18n/index.ts";
 import { getCurrentLocale } from "../i18n/index.ts";
 import { getResizedSidebarWidth, shouldAutoScrollTranscript } from "../runtime/reader-runtime.ts";
@@ -102,10 +104,7 @@ class FixedSidebarHost implements ReaderPanelHost {
         <div class="zpr-sidebar-resize" data-zpr-action="resize" aria-hidden="true"></div>
         <div class="zpr-sidebar-card">
           <div class="zpr-sidebar-head">
-            <div class="zpr-sidebar-heading">
-              <div class="zpr-sidebar-title">${escapeHtml(this.strings.panel.title)}</div>
-              <div class="zpr-sidebar-subtitle">${escapeHtml(this.isReaderDoc ? this.strings.panel.inReaderSubtitle : this.strings.panel.fallbackSubtitle)}</div>
-            </div>
+            <div class="zpr-sidebar-title">${escapeHtml(this.strings.panel.title)}</div>
             <button type="button" class="zpr-close-button" data-zpr-action="close-panel" aria-label="${escapeHtml(this.strings.panel.close)}" title="${escapeHtml(this.strings.panel.close)}">×</button>
           </div>
           <div class="zpr-sidebar-content"></div>
@@ -226,9 +225,9 @@ class FixedSidebarHost implements ReaderPanelHost {
     toolbar.className = "zpr-result-head";
     toolbar.innerHTML = `
       <div class="zpr-result-actions">
-        <button type="button" class="zpr-secondary-button" data-zpr-action="copy-chat">${escapeHtml(this.strings.panel.transcriptCopy)}</button>
-        <button type="button" class="zpr-secondary-button" data-zpr-action="regenerate">${escapeHtml(this.strings.panel.regenerate)}</button>
-        <button type="button" class="zpr-secondary-button zpr-danger-button" data-zpr-action="clear">${escapeHtml(this.strings.panel.clear)}</button>
+        <button type="button" class="zpr-toolbar-button" data-zpr-action="copy-chat">${escapeHtml(this.strings.panel.transcriptCopy)}</button>
+        <button type="button" class="zpr-toolbar-button" data-zpr-action="regenerate">${escapeHtml(this.strings.panel.regenerate)}</button>
+        <button type="button" class="zpr-toolbar-button zpr-toolbar-button-danger" data-zpr-action="clear">${escapeHtml(this.strings.panel.clear)}</button>
       </div>
     `;
     this.content.appendChild(toolbar);
@@ -266,11 +265,11 @@ class FixedSidebarHost implements ReaderPanelHost {
     }
 
     const meta = this.doc.createElement("div");
+    const visibleMeta = buildVisibleSessionMeta(session, this.strings);
     meta.className = "zpr-meta";
     meta.innerHTML = `
-      <div class="zpr-meta-title">${escapeHtml(session.paper.title || this.strings.panel.untitledPaper)}</div>
-      <div class="zpr-meta-subtitle">${escapeHtml(session.paper.authors.join(", "))}${session.paper.year ? ` · ${escapeHtml(session.paper.year)}` : ""}</div>
-      <div class="zpr-meta-mini">${escapeHtml(session.backendLabel)} · ${escapeHtml(session.model)}</div>
+      <div class="zpr-meta-title">${escapeHtml(visibleMeta.title)}</div>
+      ${visibleMeta.detail ? `<div class="zpr-meta-subtitle">${escapeHtml(visibleMeta.detail)}</div>` : ""}
     `;
     this.content.appendChild(meta);
 
@@ -533,21 +532,13 @@ class FixedSidebarHost implements ReaderPanelHost {
         display: flex;
         justify-content: space-between;
         gap: 12px;
-        align-items: flex-start;
-        padding: 16px 18px 10px;
+        align-items: center;
+        padding: 14px 16px 8px;
         border-bottom: 1px solid rgba(226, 232, 240, 0.9);
-      }
-      .zpr-sidebar-heading {
-        min-width: 0;
       }
       .zpr-sidebar-title {
         font-size: 16px;
         font-weight: 700;
-      }
-      .zpr-sidebar-subtitle {
-        color: #64748b;
-        font-size: 12px;
-        margin-top: 4px;
       }
       .zpr-close-button {
         border: 1px solid rgba(148, 163, 184, 0.35);
@@ -564,13 +555,13 @@ class FixedSidebarHost implements ReaderPanelHost {
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        padding: 16px 18px 18px;
+        padding: 12px 16px 16px;
       }
       .zpr-result-head {
         display: flex;
         justify-content: flex-end;
-        margin: -16px -18px 14px;
-        padding: 12px 18px 10px;
+        margin: -12px -16px 10px;
+        padding: 10px 16px 8px;
         background: rgba(255, 255, 255, 0.94);
         border-bottom: 1px solid rgba(226, 232, 240, 0.75);
       }
@@ -607,10 +598,28 @@ class FixedSidebarHost implements ReaderPanelHost {
         color: #b42318;
         border-color: rgba(180, 35, 24, 0.25);
       }
+      .zpr-toolbar-button {
+        border: none;
+        background: transparent;
+        color: #475569;
+        padding: 0;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .zpr-toolbar-button-danger {
+        color: #b42318;
+      }
+      .zpr-toolbar-button:disabled {
+        opacity: 0.55;
+      }
+      .zpr-meta {
+        margin-bottom: 4px;
+      }
       .zpr-meta-title {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 700;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
       }
       .zpr-meta-subtitle,
       .zpr-meta-mini {
@@ -704,6 +713,18 @@ class FixedSidebarHost implements ReaderPanelHost {
       }
       .zpr-message-body code {
         font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      }
+      .zpr-message-body .katex {
+        font-size: 1em;
+      }
+      .zpr-message-body .katex math {
+        display: inline-block;
+      }
+      .zpr-message-body .katex-display {
+        display: block;
+        overflow-x: auto;
+        margin: 10px 0;
+        text-align: center;
       }
       .zpr-message-body a {
         color: #2563eb;
@@ -875,7 +896,7 @@ export function extractCitationRefsFromMarkdown(markdown: string): CitationRef[]
 }
 
 export function renderMarkdownToHtml(markdown: string, citations: CitationRef[] = []): string {
-  return markdownRenderer.render(markdown, { citations }).trim();
+  return postProcessRenderedHtml(markdownRenderer.render(markdown, { citations }).trim());
 }
 
 export function buildSessionPlainText(session: ChatSession, strings: PluginStrings): string {
@@ -895,6 +916,16 @@ export function buildSessionPlainText(session: ChatSession, strings: PluginStrin
   }
 
   return lines.join("\n").trim();
+}
+
+export function buildVisibleSessionMeta(
+  session: ChatSession,
+  strings: PluginStrings
+): { title: string; detail: string } {
+  return {
+    title: session.paper.title || strings.panel.untitledPaper,
+    detail: session.paper.year || ""
+  };
 }
 
 function bindCitationClicks(root: HTMLElement, citations: CitationRef[], onReferenceClick: (reference: EvidenceReference) => void): void {
@@ -977,6 +1008,16 @@ function createMarkdownRenderer(): MarkdownIt {
     linkify: true,
     breaks: false
   });
+  renderer.use(texmath, {
+    engine: {
+      renderToString: (value: string, options: { displayMode?: boolean; throwOnError?: boolean }) =>
+        renderMathToString(value, Boolean(options.displayMode))
+    },
+    delimiters: ["dollars", "brackets"],
+    katexOptions: {
+      throwOnError: false
+    }
+  });
 
   renderer.renderer.rules.text = (
     tokens: Array<{ content: string }>,
@@ -1003,6 +1044,26 @@ function createMarkdownRenderer(): MarkdownIt {
   };
 
   return renderer;
+}
+
+function renderMathToString(value: string, displayMode: boolean): string {
+  const rendered = katex.renderToString(value, {
+    displayMode,
+    output: "mathml",
+    throwOnError: false,
+    strict: "ignore"
+  });
+  return displayMode
+    ? rendered.replace('class="katex"', 'class="katex katex-display"')
+    : rendered;
+}
+
+function postProcessRenderedHtml(html: string): string {
+  return html
+    .replace(/<section(?: class="eqno")?>/g, '<div class="katex-display">')
+    .replace(/<\/section>/g, "</div>")
+    .replace(/<\/?eqn>/g, "")
+    .replace(/<\/?eq>/g, "");
 }
 
 function replaceCitationTokens(text: string, citations: CitationRef[]): string {

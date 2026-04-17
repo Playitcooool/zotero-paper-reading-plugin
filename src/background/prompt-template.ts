@@ -14,8 +14,8 @@ export function buildInitialChatMessages(paper: PaperContext, locale: string): L
         "You are an academic paper reading assistant.",
         `Answer in ${outputLanguage}.`,
         "Return markdown only.",
-        "Start with a deep reading of the current paper.",
-        "Be concise but information-dense.",
+        "Start with a balanced first-pass reading of the current paper.",
+        "Answer directly and keep the first pass concise but information-dense.",
         "When possible, cite figures, tables, and page numbers using tokens like [Fig. 2], [Table 1], or [p. 5].",
         "If evidence is uncertain, say so plainly."
       ].join("\n")
@@ -23,8 +23,10 @@ export function buildInitialChatMessages(paper: PaperContext, locale: string): L
     {
       role: "user",
       content: [
-        "Read this paper and produce a detailed first-pass interpretation.",
-        "Cover the thesis, core method, reusable ideas, implementation transfer, evidence, open questions, and practical follow-up directions naturally in prose and headings when useful.",
+        "Read this paper and produce a balanced first-pass interpretation.",
+        "Use exactly these section headings: Core claim, Method in plain language, Reusable ideas, Evidence and limitations.",
+        "Keep each section to 1-3 short bullets or short sentences.",
+        "Target no more than 450 English words or 700 Chinese characters unless the user explicitly asks for more depth.",
         "",
         buildPaperPayload(paper, true)
       ].join("\n")
@@ -56,6 +58,7 @@ export function buildFollowupChatMessages(input: {
         "You are continuing a conversation about the current paper.",
         `Answer in ${outputLanguage}.`,
         "Return markdown only.",
+        "Answer directly first, then expand only when the user asks for more depth.",
         "Stay grounded in this paper and the existing conversation.",
         "When possible, cite figures, tables, and page numbers using tokens like [Fig. 2], [Table 1], or [p. 5].",
         "If the user asks beyond what the paper supports, say so."
