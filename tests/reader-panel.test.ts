@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import {
   buildPanelToolbarActions,
   buildPendingIndicatorMarkup,
+  getComposerFocusBehavior,
+  getComposerKeyAction,
+  getComposerRenderValue,
   buildVisibleMessageMeta,
   getSidebarStyles,
   shouldShowMessageCopyButton,
@@ -155,6 +158,71 @@ test("buildPendingIndicatorMarkup uses spinner markup for empty thinking state",
   const html = buildPendingIndicatorMarkup(getStringsForLocale("en-US"));
   assert.match(html, /zpr-spinner/);
   assert.match(html, /Thinking/);
+});
+
+test("getComposerKeyAction only submits on plain Enter when not composing or busy", () => {
+  assert.equal(getComposerKeyAction({
+    key: "Enter",
+    shiftKey: false,
+    isComposing: false,
+    isBusy: false
+  }), "submit");
+  assert.equal(getComposerKeyAction({
+    key: "Enter",
+    shiftKey: true,
+    isComposing: false,
+    isBusy: false
+  }), "newline");
+  assert.equal(getComposerKeyAction({
+    key: "Enter",
+    shiftKey: false,
+    isComposing: true,
+    isBusy: false
+  }), "ignore");
+  assert.equal(getComposerKeyAction({
+    key: "Backspace",
+    shiftKey: false,
+    isComposing: false,
+    isBusy: false
+  }), "ignore");
+  assert.equal(getComposerKeyAction({
+    key: "Enter",
+    shiftKey: false,
+    isComposing: false,
+    isBusy: true
+  }), "ignore");
+});
+
+test("composer render helpers preserve draft and only refocus after busy completes", () => {
+  assert.equal(getComposerRenderValue({
+    storedDraft: "draft question",
+    liveInputValue: ""
+  }), "draft question");
+  assert.equal(getComposerRenderValue({
+    storedDraft: "draft question",
+    liveInputValue: "edited draft"
+  }), "edited draft");
+
+  assert.equal(getComposerFocusBehavior({
+    wasBusy: false,
+    isBusy: false,
+    isInputFocused: false
+  }), "focus");
+  assert.equal(getComposerFocusBehavior({
+    wasBusy: false,
+    isBusy: false,
+    isInputFocused: true
+  }), "preserve");
+  assert.equal(getComposerFocusBehavior({
+    wasBusy: true,
+    isBusy: false,
+    isInputFocused: false
+  }), "focus");
+  assert.equal(getComposerFocusBehavior({
+    wasBusy: false,
+    isBusy: true,
+    isInputFocused: false
+  }), "preserve");
 });
 
 test("getSidebarStyles includes edge-resize, unified composer colors, and streaming animation hooks", () => {

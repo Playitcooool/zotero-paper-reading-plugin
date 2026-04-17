@@ -73,8 +73,17 @@ class FixedSidebarHost implements ReaderPanelHost {
   private sidebarWidth: number;
   private root: HTMLDivElement | null = null;
   private content: HTMLDivElement | null = null;
+  private notice: HTMLDivElement | null = null;
+  private meta: HTMLDivElement | null = null;
   private transcript: HTMLDivElement | null = null;
   private jumpButton: HTMLButtonElement | null = null;
+  private composer: HTMLFormElement | null = null;
+  private composerInput: HTMLTextAreaElement | null = null;
+  private composerSendButton: HTMLButtonElement | null = null;
+  private draftValue = "";
+  private isComposerComposing = false;
+  private lastComposerBusy = false;
+  private currentSubmitHandler: ((question: string) => void) | null = null;
   private autoScroll = true;
   private lastManualScrollTop = 0;
   private isHidden = false;
@@ -137,7 +146,7 @@ class FixedSidebarHost implements ReaderPanelHost {
     if (!this.mount() || !this.content) {
       return;
     }
-    this.resetTranscriptState();
+    this.resetChatViewState(true);
     this.content.innerHTML = `
       <div class="zpr-loading">
         <div class="zpr-loading-badge">${escapeHtml(this.strings.panel.title)}</div>
@@ -160,7 +169,7 @@ class FixedSidebarHost implements ReaderPanelHost {
       return;
     }
 
-    this.resetTranscriptState();
+    this.resetChatViewState(true);
     this.content.innerHTML = "";
     const empty = this.doc.createElement("div");
     empty.className = "zpr-empty";
@@ -214,42 +223,39 @@ class FixedSidebarHost implements ReaderPanelHost {
     }
 
     const previousScrollTop = this.autoScroll ? 0 : this.lastManualScrollTop;
-    this.content.innerHTML = "";
     const isBusy = Boolean(options.isBusy);
+    const wasBusy = this.lastComposerBusy;
+    this.currentSubmitHandler = handlers.onSubmit;
+    this.ensureChatView();
+    if (!this.content || !this.notice || !this.meta || !this.transcript || !this.jumpButton || !this.composerInput || !this.composerSendButton) {
+      return;
+    }
 
     const toolbarActions = buildPanelToolbarActions(this.strings);
-    if (toolbarActions.length) {
+    if (!this.content.querySelector(".zpr-result-head") && toolbarActions.length) {
       const toolbar = this.doc.createElement("div");
       toolbar.className = "zpr-result-head";
       toolbar.innerHTML = `<div class="zpr-result-actions">${toolbarActions.map((action) => (
         `<button type="button" class="zpr-toolbar-button${action.danger ? " zpr-toolbar-button-danger" : ""}" data-zpr-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>`
       )).join("")}</div>`;
-      this.content.appendChild(toolbar);
+      this.content.insertBefore(toolbar, this.content.firstChild);
     }
 
-    if (options.notice) {
-      const notice = this.doc.createElement("div");
-      notice.className = "zpr-notice";
-      notice.textContent = options.notice;
-      this.content.appendChild(notice);
-    }
+    this.notice.textContent = options.notice || "";
+    this.notice.style.display = options.notice ? "block" : "none";
 
-    const meta = this.doc.createElement("div");
     const visibleMeta = buildVisibleSessionMeta(session, this.strings);
-    meta.className = "zpr-meta";
-    meta.innerHTML = `
+    this.meta.innerHTML = `
       <div class="zpr-meta-title">${escapeHtml(visibleMeta.title)}</div>
       ${visibleMeta.detail ? `<div class="zpr-meta-subtitle">${escapeHtml(visibleMeta.detail)}</div>` : ""}
     `;
-    this.content.appendChild(meta);
 
-    const transcript = this.doc.createElement("div");
-    transcript.className = "zpr-chat-list";
+    this.transcript.innerHTML = "";
     for (const message of session.messages) {
       if (message.role === "system") {
         continue;
       }
-      transcript.appendChild(this.buildMessageBubble(message, handlers.onReferenceClick));
+      this.transcript.appendChild(this.buildMessageBubble(message, handlers.onReferenceClick));
     }
 
     if (options.failedTurn) {
@@ -267,75 +273,31 @@ class FixedSidebarHost implements ReaderPanelHost {
       error.querySelector('[data-zpr-action="retry-turn"]')?.addEventListener("click", () => {
         handlers.onRetryFailedTurn?.();
       });
-      transcript.appendChild(error);
+      this.transcript.appendChild(error);
     }
 
-    this.content.appendChild(transcript);
-    this.transcript = transcript;
-
-    const jumpButton = this.doc.createElement("button");
-    jumpButton.type = "button";
-    jumpButton.className = "zpr-jump-button";
-    jumpButton.textContent = this.strings.panel.jumpToLatest;
-    jumpButton.addEventListener("click", () => {
-      this.autoScroll = true;
-      this.scrollTranscriptToBottom();
-      this.updateJumpButtonVisibility();
+    this.draftValue = getComposerRenderValue({
+      storedDraft: this.draftValue,
+      liveInputValue: this.composerInput.value
     });
-    this.content.appendChild(jumpButton);
-    this.jumpButton = jumpButton;
-
-    const composer = this.doc.createElement("form");
-    composer.className = "zpr-composer";
-    composer.innerHTML = `
-      <textarea class="zpr-composer-input" placeholder="${escapeHtml(this.strings.panel.composerPlaceholder)}"></textarea>
-      <button type="submit" class="zpr-composer-send">${escapeHtml(this.strings.panel.send)}</button>
-    `;
-    const input = composer.querySelector(".zpr-composer-input") as HTMLTextAreaElement | null;
-    const sendButton = composer.querySelector(".zpr-composer-send") as HTMLButtonElement | null;
-    syncComposerDisabledState(input, sendButton, isBusy);
-    composer.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const value = input?.value.trim() || "";
-      if (!value || isBusy) {
-        return;
-      }
-      input!.value = "";
-      syncComposerDisabledState(input, sendButton, true);
-      handlers.onSubmit(value);
-    });
-    input?.addEventListener("input", () => {
-      syncComposerDisabledState(input, sendButton, isBusy);
-    });
-    input?.addEventListener("keydown", (event) => {
-      const keyboardEvent = event as KeyboardEvent;
-      if (keyboardEvent.key === "Enter" && !keyboardEvent.shiftKey) {
-        keyboardEvent.preventDefault();
-        composer.requestSubmit();
-      }
-    });
-    this.content.appendChild(composer);
-
-    transcript.addEventListener("scroll", () => {
-      this.autoScroll = shouldAutoScrollTranscript({
-        scrollTop: transcript.scrollTop,
-        clientHeight: transcript.clientHeight,
-        scrollHeight: transcript.scrollHeight
-      });
-      if (!this.autoScroll) {
-        this.lastManualScrollTop = transcript.scrollTop;
-      }
-      this.updateJumpButtonVisibility();
-    });
+    if (this.composerInput.value !== this.draftValue) {
+      this.composerInput.value = this.draftValue;
+    }
+    syncComposerDisabledState(this.composerInput, this.composerSendButton, isBusy);
+    this.lastComposerBusy = isBusy;
 
     if (this.autoScroll) {
       this.scrollTranscriptToBottom();
     } else {
-      transcript.scrollTop = previousScrollTop;
+      this.transcript.scrollTop = previousScrollTop;
     }
     this.updateJumpButtonVisibility();
-    if (!isBusy) {
-      input?.focus();
+    if (getComposerFocusBehavior({
+      wasBusy,
+      isBusy,
+      isInputFocused: this.doc.activeElement === this.composerInput
+    }) === "focus") {
+      this.composerInput.focus();
     }
   }
 
@@ -343,7 +305,7 @@ class FixedSidebarHost implements ReaderPanelHost {
     if (!this.mount() || !this.content) {
       return;
     }
-    this.resetTranscriptState();
+    this.resetChatViewState(true);
     this.content.innerHTML = `<div class="zpr-error"><strong>${escapeHtml(this.strings.panel.analysisFailed)}</strong><span>${escapeHtml(message)}</span></div>`;
     if (onRetry) {
       const button = this.doc.createElement("button");
@@ -360,8 +322,14 @@ class FixedSidebarHost implements ReaderPanelHost {
     this.root?.remove();
     this.root = null;
     this.content = null;
+    this.notice = null;
+    this.meta = null;
     this.transcript = null;
     this.jumpButton = null;
+    this.composer = null;
+    this.composerInput = null;
+    this.composerSendButton = null;
+    this.currentSubmitHandler = null;
   }
 
   private buildMessageBubble(message: ChatMessage, onReferenceClick: (reference: EvidenceReference) => void): HTMLDivElement {
@@ -390,6 +358,124 @@ class FixedSidebarHost implements ReaderPanelHost {
       });
     });
     return bubble;
+  }
+
+  private ensureChatView(): void {
+    if (!this.content) {
+      return;
+    }
+
+    if (this.notice && this.meta && this.transcript && this.jumpButton && this.composer && this.composerInput && this.composerSendButton) {
+      return;
+    }
+
+    this.content.innerHTML = "";
+
+    const notice = this.doc.createElement("div");
+    notice.className = "zpr-notice";
+    notice.style.display = "none";
+    this.content.appendChild(notice);
+    this.notice = notice;
+
+    const meta = this.doc.createElement("div");
+    meta.className = "zpr-meta";
+    this.content.appendChild(meta);
+    this.meta = meta;
+
+    const transcript = this.doc.createElement("div");
+    transcript.className = "zpr-chat-list";
+    transcript.addEventListener("scroll", () => {
+      this.autoScroll = shouldAutoScrollTranscript({
+        scrollTop: transcript.scrollTop,
+        clientHeight: transcript.clientHeight,
+        scrollHeight: transcript.scrollHeight
+      });
+      if (!this.autoScroll) {
+        this.lastManualScrollTop = transcript.scrollTop;
+      }
+      this.updateJumpButtonVisibility();
+    });
+    this.content.appendChild(transcript);
+    this.transcript = transcript;
+
+    const jumpButton = this.doc.createElement("button");
+    jumpButton.type = "button";
+    jumpButton.className = "zpr-jump-button";
+    jumpButton.textContent = this.strings.panel.jumpToLatest;
+    jumpButton.addEventListener("click", () => {
+      this.autoScroll = true;
+      this.scrollTranscriptToBottom();
+      this.updateJumpButtonVisibility();
+    });
+    this.content.appendChild(jumpButton);
+    this.jumpButton = jumpButton;
+
+    const composer = this.doc.createElement("form");
+    composer.className = "zpr-composer";
+    composer.innerHTML = `
+      <textarea class="zpr-composer-input" placeholder="${escapeHtml(this.strings.panel.composerPlaceholder)}"></textarea>
+      <button type="submit" class="zpr-composer-send">${escapeHtml(this.strings.panel.send)}</button>
+    `;
+    const input = composer.querySelector(".zpr-composer-input") as HTMLTextAreaElement | null;
+    const sendButton = composer.querySelector(".zpr-composer-send") as HTMLButtonElement | null;
+    if (!input || !sendButton) {
+      return;
+    }
+
+    composer.addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const value = input.value.trim();
+      if (!value || this.lastComposerBusy) {
+        return;
+      }
+      this.draftValue = "";
+      input.value = "";
+      syncComposerDisabledState(input, sendButton, true);
+      this.currentSubmitHandler?.(value);
+    });
+
+    const stopEventPropagation = (event: Event) => {
+      event.stopPropagation();
+    };
+
+    input.addEventListener("beforeinput", stopEventPropagation);
+    input.addEventListener("keyup", stopEventPropagation);
+    input.addEventListener("input", (event) => {
+      event.stopPropagation();
+      this.draftValue = input.value;
+      syncComposerDisabledState(input, sendButton, this.lastComposerBusy);
+    });
+    input.addEventListener("compositionstart", (event) => {
+      event.stopPropagation();
+      this.isComposerComposing = true;
+    });
+    input.addEventListener("compositionupdate", stopEventPropagation);
+    input.addEventListener("compositionend", (event) => {
+      event.stopPropagation();
+      this.isComposerComposing = false;
+      this.draftValue = input.value;
+      syncComposerDisabledState(input, sendButton, this.lastComposerBusy);
+    });
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      const keyboardEvent = event as KeyboardEvent;
+      const action = getComposerKeyAction({
+        key: keyboardEvent.key,
+        shiftKey: keyboardEvent.shiftKey,
+        isComposing: keyboardEvent.isComposing || this.isComposerComposing,
+        isBusy: this.lastComposerBusy
+      });
+      if (action === "submit") {
+        keyboardEvent.preventDefault();
+        composer.requestSubmit();
+      }
+    });
+
+    this.content.appendChild(composer);
+    this.composer = composer;
+    this.composerInput = input;
+    this.composerSendButton = sendButton;
   }
 
   private bindResizeHandle(): void {
@@ -423,9 +509,23 @@ class FixedSidebarHost implements ReaderPanelHost {
     });
   }
 
-  private resetTranscriptState(): void {
+  private resetChatViewState(clearDraft: boolean): void {
+    if (this.composerInput) {
+      this.draftValue = this.composerInput.value;
+    }
+    if (clearDraft) {
+      this.draftValue = "";
+    }
+    this.notice = null;
+    this.meta = null;
     this.transcript = null;
     this.jumpButton = null;
+    this.composer = null;
+    this.composerInput = null;
+    this.composerSendButton = null;
+    this.currentSubmitHandler = null;
+    this.isComposerComposing = false;
+    this.lastComposerBusy = false;
     this.autoScroll = true;
     this.lastManualScrollTop = 0;
   }
@@ -959,6 +1059,42 @@ export function shouldShowMessageCopyButton(message: ChatMessage): boolean {
 
 export function buildPendingIndicatorMarkup(strings: PluginStrings): string {
   return `<div class="zpr-pending"><span class="zpr-spinner" aria-hidden="true"></span><span>${escapeHtml(strings.panel.thinking)}</span></div>`;
+}
+
+export function getComposerKeyAction(args: {
+  key: string;
+  shiftKey: boolean;
+  isComposing: boolean;
+  isBusy: boolean;
+}): "submit" | "newline" | "ignore" {
+  if (args.key !== "Enter") {
+    return "ignore";
+  }
+  if (args.shiftKey) {
+    return "newline";
+  }
+  if (args.isComposing || args.isBusy) {
+    return "ignore";
+  }
+  return "submit";
+}
+
+export function getComposerRenderValue(args: {
+  storedDraft: string;
+  liveInputValue: string;
+}): string {
+  return args.liveInputValue || args.storedDraft;
+}
+
+export function getComposerFocusBehavior(args: {
+  wasBusy: boolean;
+  isBusy: boolean;
+  isInputFocused: boolean;
+}): "focus" | "preserve" {
+  if (args.isBusy || args.isInputFocused) {
+    return "preserve";
+  }
+  return "focus";
 }
 
 function bindCitationClicks(root: HTMLElement, citations: CitationRef[], onReferenceClick: (reference: EvidenceReference) => void): void {
