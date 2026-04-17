@@ -16,3 +16,8 @@ test("preferences page has language and advanced setting sections", () => {
 test("preferences page no longer exposes promptLanguage input", () => {
   assert.ok(!source.includes('id="promptLanguage"'));
 });
+
+test("preferences page no longer exposes backend mode or companion inputs", () => {
+  assert.ok(!source.includes('id="backendMode"'));
+  assert.ok(!source.includes('id="companionUrl"'));
+});

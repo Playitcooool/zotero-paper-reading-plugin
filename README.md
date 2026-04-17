@@ -9,43 +9,31 @@ When a paper is open, the plugin injects an `Ask AI` button into the reader tool
 - Adds an `Ask AI` button to the Zotero PDF reader toolbar.
 - Opens a dedicated right-side paper chat panel without replacing the PDF view.
 - Generates the first paper reading automatically, then supports follow-up chat.
+- Streams assistant output live in the sidebar while preserving Markdown rendering.
 - Renders model output as Markdown with headings, lists, quotes, and code fences.
 - Turns citations such as `[Fig. 2]`, `[Table 1]`, and `[p. 5]` into clickable references when a page mapping is available.
 - Saves the chat transcript as a plugin-managed Zotero child note for the attachment.
 - Localizes the interface and default response language for Chinese and English Zotero environments.
-- Supports direct model calls and a local companion service mode.
+- Supports direct local or remote provider endpoints.
 
 ## Compatibility
 
 - Zotero `7.0+`
 - Add-on manifest currently allows Zotero versions up to `9.9.9`
 
-## Backend Modes
+## Providers
 
-### Direct mode
-
-The plugin can call a model endpoint directly from Zotero. Current provider options are:
+The plugin calls a model endpoint directly from Zotero. Current provider options are:
 
 - OpenAI-compatible endpoints
 - Anthropic
 - Google Gemini API
 
-Typical direct-mode fields:
+Typical fields:
 
 - API address
 - API key
 - Model name
-- Request timeout
-
-### Companion mode
-
-The plugin can also forward chat requests to a local companion service. In this mode, the plugin sends requests to:
-
-`<companion-url>/chat`
-
-Typical companion-mode fields:
-
-- Companion URL
 - Request timeout
 
 ## Installation
@@ -81,12 +69,10 @@ The packaged add-on will be generated at:
 
 The plugin registers its own Zotero preferences pane. You can configure:
 
-- Backend mode
-- Provider selection for direct mode
+- Provider selection
 - API address
 - API key
 - Model name
-- Companion URL
 - Request timeout
 - Sidebar width
 
@@ -107,5 +93,4 @@ npm run watch
 ## Notes
 
 - The plugin depends on Zotero attachment text. If a PDF has no extracted text yet, reindex the attachment in Zotero and try again.
-- The repository does not currently include a hosted companion server. Companion mode expects an already running local service that implements the `/chat` endpoint.
 - The build output and `node_modules` are intentionally excluded from version control.

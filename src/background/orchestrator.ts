@@ -2,8 +2,16 @@ import { createBackend } from "./backends.ts";
 import { getCurrentLocale, getCurrentStrings } from "../i18n/index.ts";
 import { buildFollowupChatMessages, buildInitialChatMessages } from "./prompt-template.ts";
 import { getAllSettings, type PluginSettings } from "./settings-manager.ts";
-import type { ChatMessage, ChatSession, CitationRef, PaperContext } from "./types.ts";
+import type { AnalysisBackend, ChatMessage, ChatSession, CitationRef, PaperContext } from "./types.ts";
 import { extractCitationRefsFromMarkdown } from "../reader/panel.ts";
+
+export interface PreparedStreamTurn {
+  backend: AnalysisBackend;
+  session: ChatSession;
+  paper: PaperContext;
+  locale: string;
+  promptSession: ChatSession;
+}
 
 export async function startChatSession(
   attachment: Zotero.Item,
@@ -77,6 +85,81 @@ export async function continueChatSession(
   };
 }
 
+export async function prepareInitialChatStream(
+  attachment: Zotero.Item,
+  settings: PluginSettings = getAllSettings()
+): Promise<PreparedStreamTurn> {
+  const paper = await buildPaperContext(attachment);
+  const locale = getCurrentLocale();
+  ensureAttachmentText(paper, locale);
+
+  const createdAt = new Date().toISOString();
+  return {
+    backend: createBackend(settings),
+    paper,
+    locale,
+    promptSession: {
+      paper: {
+        itemID: paper.itemID,
+        title: paper.title,
+        authors: paper.authors,
+        year: paper.year
+      },
+      backendLabel: "",
+      model: settings.modelName,
+      createdAt,
+      updatedAt: createdAt,
+      messages: []
+    },
+    session: appendPendingAssistantMessage({
+      paper: {
+        itemID: paper.itemID,
+        title: paper.title,
+        authors: paper.authors,
+        year: paper.year
+      },
+      backendLabel: "",
+      model: settings.modelName,
+      createdAt,
+      updatedAt: createdAt,
+      messages: []
+    }, createdAt)
+  };
+}
+
+export async function prepareFollowupChatStream(
+  attachment: Zotero.Item,
+  session: ChatSession,
+  question: string,
+  settings: PluginSettings = getAllSettings()
+): Promise<PreparedStreamTurn> {
+  const paper = await buildPaperContext(attachment);
+  const locale = getCurrentLocale();
+  ensureAttachmentText(paper, locale);
+
+  const assistantTimestamp = new Date().toISOString();
+  return {
+    backend: createBackend(settings),
+    paper,
+    locale,
+    promptSession: session,
+    session: appendPendingAssistantMessage(appendUserDraft(session, question), assistantTimestamp)
+  };
+}
+
+export function buildInitialStreamMessages(input: PreparedStreamTurn) {
+  return buildInitialChatMessages(input.paper, input.locale);
+}
+
+export function buildFollowupStreamMessages(input: PreparedStreamTurn, question: string) {
+  return buildFollowupChatMessages({
+    paper: input.paper,
+    session: input.promptSession,
+    question,
+    locale: input.locale
+  });
+}
+
 export function appendUserDraft(session: ChatSession, question: string): ChatSession {
   return {
     ...session,
@@ -85,6 +168,90 @@ export function appendUserDraft(session: ChatSession, question: string): ChatSes
       ...session.messages,
       buildUserMessage(question, new Date().toISOString())
     ]
+  };
+}
+
+export function appendPendingAssistantMessage(session: ChatSession, createdAt: string = new Date().toISOString()): ChatSession {
+  return {
+    ...session,
+    updatedAt: createdAt,
+    messages: [
+      ...session.messages,
+      {
+        id: `assistant-${createdAt}`,
+        role: "assistant",
+        markdown: "",
+        createdAt,
+        citations: [],
+        status: "pending"
+      }
+    ]
+  };
+}
+
+export function appendAssistantDelta(session: ChatSession, delta: string): ChatSession {
+  if (!delta) {
+    return session;
+  }
+
+  const nextMessages = session.messages.slice();
+  const lastMessage = nextMessages[nextMessages.length - 1];
+  if (!lastMessage || lastMessage.role !== "assistant") {
+    return session;
+  }
+
+  const markdown = `${lastMessage.markdown}${delta}`;
+  nextMessages[nextMessages.length - 1] = {
+    ...lastMessage,
+    markdown,
+    citations: extractCitationRefsFromMarkdown(markdown),
+    status: "pending"
+  };
+
+  return {
+    ...session,
+    updatedAt: new Date().toISOString(),
+    messages: nextMessages
+  };
+}
+
+export function finalizeAssistantMessage(
+  session: ChatSession,
+  meta: {
+    backendLabel: string;
+    model: string;
+    updatedAt?: string;
+  }
+): ChatSession {
+  const updatedAt = meta.updatedAt || new Date().toISOString();
+  const nextMessages = session.messages.slice();
+  const lastMessage = nextMessages[nextMessages.length - 1];
+  if (lastMessage?.role === "assistant") {
+    nextMessages[nextMessages.length - 1] = {
+      ...lastMessage,
+      citations: extractCitationRefsFromMarkdown(lastMessage.markdown),
+      status: "done"
+    };
+  }
+
+  return {
+    ...session,
+    backendLabel: meta.backendLabel,
+    model: meta.model,
+    updatedAt,
+    messages: nextMessages
+  };
+}
+
+export function removePendingAssistantMessage(session: ChatSession): ChatSession {
+  const lastMessage = session.messages[session.messages.length - 1];
+  if (!lastMessage || lastMessage.role !== "assistant" || lastMessage.status !== "pending") {
+    return session;
+  }
+
+  return {
+    ...session,
+    messages: session.messages.slice(0, -1)
   };
 }
 

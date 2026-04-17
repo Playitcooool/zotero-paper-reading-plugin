@@ -7,6 +7,17 @@ export interface PanelHostMeta {
   sidebarWidth: number;
 }
 
+export interface ScrollMetrics {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+}
+
+const MIN_SIDEBAR_WIDTH = 320;
+const MAX_SIDEBAR_WIDTH = 720;
+const VIEWPORT_SLACK = 240;
+const AUTO_SCROLL_THRESHOLD = 32;
+
 export function createInitialReaderState(): ReaderRequestState {
   return {
     requestToken: 0
@@ -40,4 +51,24 @@ export function shouldRecreatePanelHost(
   }
 
   return existing.sidebarWidth !== nextSidebarWidth;
+}
+
+export function clampSidebarWidth(width: number, viewportWidth: number): number {
+  const viewportMax = Math.max(MIN_SIDEBAR_WIDTH, viewportWidth - VIEWPORT_SLACK);
+  const maxWidth = Math.min(MAX_SIDEBAR_WIDTH, viewportMax);
+  return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), maxWidth);
+}
+
+export function getResizedSidebarWidth(args: {
+  startWidth: number;
+  startClientX: number;
+  currentClientX: number;
+  viewportWidth: number;
+}): number {
+  const delta = args.startClientX - args.currentClientX;
+  return clampSidebarWidth(args.startWidth + delta, args.viewportWidth);
+}
+
+export function shouldAutoScrollTranscript(metrics: ScrollMetrics): boolean {
+  return metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - AUTO_SCROLL_THRESHOLD;
 }

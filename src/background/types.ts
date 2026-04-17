@@ -108,10 +108,25 @@ export interface ChatResponse {
   model: string;
 }
 
+export type ChatStreamEvent =
+  | {
+    type: "metadata";
+    backendLabel: string;
+    model: string;
+  }
+  | {
+    type: "delta";
+    text: string;
+  }
+  | {
+    type: "done";
+  };
+
 export interface AnalysisBackend {
-  kind: "direct" | "companion";
+  kind: "direct";
   label: string;
   chat(request: ChatRequest): Promise<ChatResponse>;
+  chatStream(request: ChatRequest): AsyncIterable<ChatStreamEvent>;
 }
 
 export interface PanelSessionState {

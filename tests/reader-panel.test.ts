@@ -66,6 +66,27 @@ test("renderMarkdownToHtml downgrades unmapped figure citations to non-interacti
   assert.match(html, /zpr-citation-label/);
 });
 
+test("renderMarkdownToHtml supports fenced code blocks with language markers", () => {
+  const html = renderMarkdownToHtml("```ts\nconst answer = 42;\n```");
+
+  assert.match(html, /<pre><code/);
+  assert.match(html, /const answer = 42/);
+});
+
+test("renderMarkdownToHtml supports tables", () => {
+  const html = renderMarkdownToHtml("| A | B |\n| --- | --- |\n| 1 | 2 |");
+
+  assert.match(html, /<table/);
+  assert.match(html, /<td>1<\/td>/);
+});
+
+test("renderMarkdownToHtml escapes raw html instead of rendering it", () => {
+  const html = renderMarkdownToHtml("<script>alert(1)</script>");
+
+  assert.ok(!html.includes("<script>"));
+  assert.match(html, /&lt;script&gt;/);
+});
+
 test("buildSessionPlainText includes the conversation transcript", () => {
   const text = buildSessionPlainText(sampleSession, getStringsForLocale("en-US"));
 

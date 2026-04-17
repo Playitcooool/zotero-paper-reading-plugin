@@ -130,28 +130,15 @@
   </vbox>
 
   <vbox class="zpr-card">
-    <html:div id="zpr-backend-title" class="zpr-section-title">后端模式</html:div>
-
-    <html:div class="zpr-field">
-      <html:label id="zpr-backend-mode-label" class="zpr-label" for="backendMode">运行模式</html:label>
-      <html:select id="backendMode" class="zpr-input">
-        <html:option value="direct">插件直连模型</html:option>
-        <html:option value="companion">本地 companion 服务</html:option>
-      </html:select>
-      <html:span id="zpr-backend-mode-help" class="zpr-help">选择由插件直连模型，或转发到本地 companion 服务。</html:span>
-    </html:div>
+    <html:div id="zpr-backend-title" class="zpr-section-title">Provider 与凭据</html:div>
 
     <html:div class="zpr-summary">
-      <html:div id="zpr-mode-summary-title" class="zpr-summary-title">当前模式建议</html:div>
-      <html:div id="zpr-mode-summary-body" class="zpr-summary-body">直连模式下，通常只需要填写 API 地址、API Key 和模型名称即可开始使用。</html:div>
+      <html:div id="zpr-mode-summary-title" class="zpr-summary-title">当前连接建议</html:div>
+      <html:div id="zpr-mode-summary-body" class="zpr-summary-body">通常只需要选择 provider，填写 API 地址、API Key 和模型名称即可开始使用。</html:div>
     </html:div>
-  </vbox>
 
-  <vbox class="zpr-card">
-    <html:div id="zpr-credentials-title" class="zpr-section-title">连接与凭据</html:div>
-
-    <html:div class="zpr-field zpr-direct-only">
-      <html:label id="zpr-provider-label" class="zpr-label" for="directProvider">直连协议</html:label>
+    <html:div class="zpr-field">
+      <html:label id="zpr-provider-label" class="zpr-label" for="directProvider">Provider</html:label>
       <html:select id="directProvider" class="zpr-input">
         <html:option value="openai-compatible">OpenAI Compatible</html:option>
         <html:option value="anthropic">Anthropic</html:option>
@@ -159,28 +146,22 @@
       </html:select>
     </html:div>
 
-    <html:div class="zpr-field zpr-direct-only">
+    <html:div class="zpr-field">
       <html:label id="zpr-api-address-label" class="zpr-label" for="apiAddress">API 地址</html:label>
       <html:input id="apiAddress" class="zpr-input" type="text"/>
       <html:span id="zpr-api-address-help" class="zpr-help">通常只在自定义接口或私有部署时需要修改。</html:span>
     </html:div>
 
-    <html:div class="zpr-field zpr-direct-only">
+    <html:div class="zpr-field">
       <html:label id="zpr-api-key-label" class="zpr-label" for="apiKey">API Key</html:label>
       <html:input id="apiKey" class="zpr-input" type="password"/>
       <html:span id="zpr-api-key-help" class="zpr-help">如果服务不要求密钥，可以留空。</html:span>
     </html:div>
 
-    <html:div class="zpr-field zpr-direct-only">
+    <html:div class="zpr-field">
       <html:label id="zpr-model-name-label" class="zpr-label" for="modelName">模型名称</html:label>
       <html:input id="modelName" class="zpr-input" type="text"/>
       <html:span id="zpr-model-name-help" class="zpr-help">建议选择支持长上下文文档理解的模型。</html:span>
-    </html:div>
-
-    <html:div class="zpr-field zpr-companion-only">
-      <html:label id="zpr-companion-url-label" class="zpr-label" for="companionUrl">Companion 地址</html:label>
-      <html:input id="companionUrl" class="zpr-input" type="text"/>
-      <html:span id="zpr-companion-url-help" class="zpr-help">例如 `http://127.0.0.1:8765`。插件会向 `/chat` 发起请求。</html:span>
     </html:div>
   </vbox>
 

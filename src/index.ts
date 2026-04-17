@@ -1,4 +1,12 @@
-import { appendUserDraft, continueChatSession, startChatSession } from "./background/orchestrator.ts";
+import {
+  appendAssistantDelta,
+  buildFollowupStreamMessages,
+  buildInitialStreamMessages,
+  finalizeAssistantMessage,
+  prepareFollowupChatStream,
+  prepareInitialChatStream,
+  removePendingAssistantMessage
+} from "./background/orchestrator.ts";
 import { deleteSavedChatSessionForAttachment, loadSavedChatSessionForAttachment, saveChatSessionForAttachment } from "./background/persistence.ts";
 import { DEFAULT_SETTINGS, getAllSettings, getSidebarWidth, setSetting, type PluginSettings } from "./background/settings-manager.ts";
 import { getCurrentStrings } from "./i18n/index.ts";
@@ -7,7 +15,7 @@ import { createInitialReaderState, shouldApplyRequestResult, shouldRecreatePanel
 import { createReaderPanelHost, type ReaderPanelHost } from "./reader/panel.ts";
 import { shouldEnableAskAI, toReaderLocation } from "./reader/reference-utils.ts";
 import { buildAskAIButtonMarkup, ensureAskAIButtonStyles } from "./reader/toolbar-button.ts";
-import type { ChatSession, EvidenceReference } from "./background/types.ts";
+import type { ChatSession, ChatStreamEvent, EvidenceReference } from "./background/types.ts";
 
 declare const Services: any;
 
@@ -29,6 +37,7 @@ interface FailedTurnState {
 
 interface ReaderState {
   session: ChatSession | null;
+  isPanelVisible: boolean;
   bootstrapping: boolean;
   sendingFollowup: boolean;
   retryingTurnId: string | null;
@@ -155,6 +164,7 @@ async function openChatPanel(reader: _ZoteroTypes.ReaderInstance): Promise<void>
   const hostEntry = getOrCreatePanelHost(reader, sidebarWidth, mainWindow, strings);
   const host = hostEntry.host;
   const state = getOrCreateReaderState(reader);
+  state.isPanelVisible = true;
 
   if (state.session || state.panelError || state.bootstrapping) {
     renderPanelState(reader, host, state);
@@ -197,13 +207,29 @@ async function startFreshSession(reader: _ZoteroTypes.ReaderInstance, followupQu
   const requestToken = startRequest(state);
 
   try {
-    const session = await startChatSession(attachment, getAllSettings());
+    const prepared = await prepareInitialChatStream(attachment, getAllSettings());
     if (!shouldApplyAsyncResult(reader, state, requestToken, hostEntry)) {
       return;
     }
-    state.session = session;
+    state.session = prepared.session;
     state.bootstrapping = false;
     renderPanelState(reader, host, state);
+    const session = await consumeStreamIntoState(
+      reader,
+      hostEntry,
+      state,
+      prepared.session,
+      prepared.backend.chatStream({
+        paper: prepared.paper,
+        messages: buildInitialStreamMessages(prepared),
+        mode: "initial",
+        locale: prepared.locale
+      }),
+      requestToken
+    );
+    if (!session) {
+      return;
+    }
     await saveChatSessionForAttachment(attachment, session);
     if (followupQuestion) {
       await submitFollowup(reader, followupQuestion);
@@ -212,6 +238,7 @@ async function startFreshSession(reader: _ZoteroTypes.ReaderInstance, followupQu
     if (!shouldApplyAsyncResult(reader, state, requestToken, hostEntry)) {
       return;
     }
+    state.session = null;
     state.bootstrapping = false;
     state.panelError = error instanceof Error ? error.message : String(error);
     renderPanelState(reader, host, state);
@@ -219,6 +246,11 @@ async function startFreshSession(reader: _ZoteroTypes.ReaderInstance, followupQu
 }
 
 function renderPanelState(reader: _ZoteroTypes.ReaderInstance, host: ReaderPanelHost, state: ReaderState): void {
+  host.setHidden(!state.isPanelVisible);
+  if (!state.isPanelVisible) {
+    return;
+  }
+
   if (state.bootstrapping && !state.session) {
     const attachment = getAttachmentForReader(reader);
     host.showLoading(
@@ -290,9 +322,9 @@ async function submitFollowup(reader: _ZoteroTypes.ReaderInstance, question: str
   }
 
   const baseSession = state.session;
-  const draft = appendUserDraft(baseSession, question);
-  const userMessageId = draft.messages[draft.messages.length - 1]?.id || "";
-  state.session = draft;
+  const prepared = await prepareFollowupChatStream(attachment, baseSession, question, getAllSettings());
+  const userMessageId = prepared.session.messages.findLast((message) => message.role === "user")?.id || "";
+  state.session = prepared.session;
   state.sendingFollowup = true;
   state.failedTurn = null;
   state.panelError = null;
@@ -300,8 +332,20 @@ async function submitFollowup(reader: _ZoteroTypes.ReaderInstance, question: str
   const requestToken = startRequest(state);
 
   try {
-    const next = await continueChatSession(attachment, baseSession, question, getAllSettings());
-    if (!shouldApplyAsyncResult(reader, state, requestToken, hostEntry)) {
+    const next = await consumeStreamIntoState(
+      reader,
+      hostEntry,
+      state,
+      prepared.session,
+      prepared.backend.chatStream({
+        paper: prepared.paper,
+        messages: buildFollowupStreamMessages(prepared, question),
+        mode: "followup",
+        locale: prepared.locale
+      }),
+      requestToken
+    );
+    if (!next) {
       return;
     }
     state.session = next;
@@ -313,6 +357,7 @@ async function submitFollowup(reader: _ZoteroTypes.ReaderInstance, question: str
       return;
     }
     state.sendingFollowup = false;
+    state.session = removePendingAssistantMessage(prepared.session);
     state.failedTurn = {
       question,
       baseSession,
@@ -343,10 +388,27 @@ async function retryFailedTurn(reader: _ZoteroTypes.ReaderInstance): Promise<voi
   state.failedTurn = null;
   renderPanelState(reader, host, state);
   const requestToken = startRequest(state);
+  let preparedSession: ChatSession | null = null;
 
   try {
-    const next = await continueChatSession(attachment, failedTurn.baseSession, failedTurn.question, getAllSettings());
-    if (!shouldApplyAsyncResult(reader, state, requestToken, hostEntry)) {
+    const prepared = await prepareFollowupChatStream(attachment, failedTurn.baseSession, failedTurn.question, getAllSettings());
+    preparedSession = prepared.session;
+    state.session = prepared.session;
+    renderPanelState(reader, host, state);
+    const next = await consumeStreamIntoState(
+      reader,
+      hostEntry,
+      state,
+      prepared.session,
+      prepared.backend.chatStream({
+        paper: prepared.paper,
+        messages: buildFollowupStreamMessages(prepared, failedTurn.question),
+        mode: "followup",
+        locale: prepared.locale
+      }),
+      requestToken
+    );
+    if (!next) {
       return;
     }
     state.session = next;
@@ -358,6 +420,7 @@ async function retryFailedTurn(reader: _ZoteroTypes.ReaderInstance): Promise<voi
       return;
     }
     state.retryingTurnId = null;
+    state.session = preparedSession ? removePendingAssistantMessage(preparedSession) : state.session;
     state.failedTurn = {
       ...failedTurn,
       errorMessage: error instanceof Error ? error.message : String(error),
@@ -365,6 +428,63 @@ async function retryFailedTurn(reader: _ZoteroTypes.ReaderInstance): Promise<voi
     };
     renderPanelState(reader, host, state);
   }
+}
+
+async function consumeStreamIntoState(
+  reader: _ZoteroTypes.ReaderInstance,
+  hostEntry: PanelHostEntry | undefined,
+  state: ReaderState,
+  startingSession: ChatSession,
+  stream: AsyncIterable<ChatStreamEvent>,
+  requestToken: number
+): Promise<ChatSession | null> {
+  const host = hostEntry?.host;
+  if (!host) {
+    return null;
+  }
+
+  let session = startingSession;
+  let metadata = {
+    backendLabel: session.backendLabel,
+    model: session.model
+  };
+
+  for await (const event of stream) {
+    if (!shouldApplyAsyncResult(reader, state, requestToken, hostEntry)) {
+      return null;
+    }
+
+    if (event.type === "metadata") {
+      metadata = {
+        backendLabel: event.backendLabel,
+        model: event.model
+      };
+      session = {
+        ...session,
+        backendLabel: event.backendLabel,
+        model: event.model
+      };
+    }
+
+    if (event.type === "delta") {
+      session = appendAssistantDelta(session, event.text);
+    }
+
+    if (event.type === "done") {
+      session = finalizeAssistantMessage(session, metadata);
+    }
+
+    state.session = session;
+    renderPanelState(reader, host, state);
+  }
+
+  if (session.messages[session.messages.length - 1]?.status === "pending") {
+    session = finalizeAssistantMessage(session, metadata);
+    state.session = session;
+    renderPanelState(reader, host, state);
+  }
+
+  return session;
 }
 
 async function clearChatSession(reader: _ZoteroTypes.ReaderInstance): Promise<void> {
@@ -458,8 +578,31 @@ function getOrCreatePanelHost(
   const key = getReaderKey(reader);
   const existing = panelHosts.get(key);
   const doc = resolvePanelDocument(reader, mainWindow);
+  const createHost = () => createReaderPanelHost(reader, sidebarWidth, mainWindow, strings, {
+    onClose: () => {
+      const state = panelState.get(key);
+      if (!state) {
+        return;
+      }
+      state.isPanelVisible = false;
+      const entry = panelHosts.get(key);
+      if (entry) {
+        renderPanelState(reader, entry.host, state);
+      }
+    },
+    onResize: (width: number) => {
+      setSetting("sidebarWidth", String(width) as PluginSettings["sidebarWidth"]);
+      const entry = panelHosts.get(key);
+      if (!entry) {
+        return;
+      }
+      entry.sidebarWidth = width;
+      entry.host.setWidth(width);
+    }
+  });
+
   if (!doc) {
-    const host = createReaderPanelHost(reader, sidebarWidth, mainWindow, strings);
+    const host = createHost();
     host.mount();
     return {
       host,
@@ -469,6 +612,7 @@ function getOrCreatePanelHost(
   }
 
   if (existing && !shouldRecreatePanelHost(existing, doc, sidebarWidth)) {
+    existing.host.setWidth(sidebarWidth);
     return existing;
   }
 
@@ -478,7 +622,7 @@ function getOrCreatePanelHost(
     panelState.delete(key);
   }
 
-  const host = createReaderPanelHost(reader, sidebarWidth, mainWindow, strings);
+  const host = createHost();
   host.mount();
   const entry: PanelHostEntry = { host, doc, sidebarWidth };
   panelHosts.set(key, entry);
@@ -494,6 +638,7 @@ function getOrCreateReaderState(reader: _ZoteroTypes.ReaderInstance): ReaderStat
 
   const state: ReaderState = {
     session: null,
+    isPanelVisible: false,
     bootstrapping: false,
     sendingFollowup: false,
     retryingTurnId: null,

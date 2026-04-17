@@ -77,12 +77,10 @@ test("initPreferencesDocument is idempotent and syncs visibility", () => {
   const calls: Array<[string, string]> = [];
 
   for (const id of [
-    "backendMode",
     "directProvider",
     "apiAddress",
     "apiKey",
     "modelName",
-    "companionUrl",
     "requestTimeoutMs",
     "sidebarWidth",
     "zpr-mode-summary-title",
@@ -96,13 +94,11 @@ test("initPreferencesDocument is idempotent and syncs visibility", () => {
     doc.addElement(id);
   }
 
-  doc.addElement("direct-1", "zpr-direct-only");
-  doc.addElement("companion-1", "zpr-companion-only");
   doc.addElement("advanced-1", "zpr-advanced");
 
   initPreferencesDocument(doc as unknown as Document, {
     defaults: DEFAULT_SETTINGS,
-    getAllSettings: () => ({ ...DEFAULT_SETTINGS, backendMode: "companion" }),
+    getAllSettings: () => ({ ...DEFAULT_SETTINGS }),
     setSetting: (key, value) => {
       calls.push([String(key), String(value)]);
     },
@@ -111,28 +107,25 @@ test("initPreferencesDocument is idempotent and syncs visibility", () => {
 
   initPreferencesDocument(doc as unknown as Document, {
     defaults: DEFAULT_SETTINGS,
-    getAllSettings: () => ({ ...DEFAULT_SETTINGS, backendMode: "companion" }),
+    getAllSettings: () => ({ ...DEFAULT_SETTINGS }),
     setSetting: (key, value) => {
       calls.push([String(key), String(value)]);
     },
     strings: getStringsForLocale("en-US")
   });
 
-  assert.equal(doc.getElementById("backendMode")?.listeners.get("change")?.length, 1);
   assert.equal(doc.getElementById("saveBtn")?.listeners.get("click")?.length, 1);
   assert.equal(doc.getElementById("resetBtn")?.listeners.get("click")?.length, 1);
   assert.equal(doc.getElementById("toggleAdvancedBtn")?.listeners.get("click")?.length, 1);
-  assert.equal(doc.querySelectorAll(".zpr-direct-only")[0]?.style.display, "none");
-  assert.equal(doc.querySelectorAll(".zpr-companion-only")[0]?.style.display, "");
   assert.equal(doc.getElementById("advancedSettings")?.style.display, "none");
-  assert.equal(doc.getElementById("zpr-mode-summary-title")?.textContent, "Current mode guidance");
+  assert.equal(doc.getElementById("zpr-mode-summary-title")?.textContent, "Current connection guidance");
   assert.equal(
     doc.getElementById("zpr-mode-summary-body")?.textContent,
-    "In companion mode, make sure the local service is running and the Companion URL is reachable."
+    "You usually only need the provider, API address, API key, and model name before you start."
   );
 
   doc.getElementById("saveBtn")?.trigger("click");
-  assert.ok(calls.some(([key]) => key === "backendMode"));
+  assert.ok(calls.some(([key]) => key === "directProvider"));
   assert.equal(doc.getElementById("settingsStatus")?.textContent, "Saved");
 
   doc.getElementById("toggleAdvancedBtn")?.trigger("click");
@@ -144,12 +137,10 @@ test("initPreferencesDocument normalizes invalid numeric settings and reports it
   const calls: Array<[string, string]> = [];
 
   for (const id of [
-    "backendMode",
     "directProvider",
     "apiAddress",
     "apiKey",
     "modelName",
-    "companionUrl",
     "requestTimeoutMs",
     "sidebarWidth",
     "zpr-mode-summary-title",
