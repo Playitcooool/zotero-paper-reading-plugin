@@ -107,3 +107,79 @@ test("openai-compatible backend streams metadata, delta, and done events", async
   assert.equal(events[2]?.text, " world");
   assert.equal(events[3]?.type, "done");
 });
+
+test("direct backend works when AbortController is unavailable", async () => {
+  const originalAbortController = globalThis.AbortController;
+  try {
+    Object.defineProperty(globalThis, "AbortController", {
+      configurable: true,
+      value: undefined
+    });
+
+    const backend = createBackend({
+      ...DEFAULT_SETTINGS,
+      directProvider: "anthropic"
+    }, {
+      fetch: async (_input, init) => {
+        assert.equal(init?.signal, undefined);
+        return new Response(JSON.stringify({
+          content: [
+            {
+              text: "Hello from fallback"
+            }
+          ]
+        }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+    });
+
+    const response = await backend.chat({
+      paper: {
+        itemID: 1,
+        title: "Sample",
+        authors: ["Jane Doe"],
+        year: "2026",
+        attachmentText: "Paper body"
+      },
+      messages: [{ role: "user", content: "Question" }],
+      mode: "followup",
+      locale: "en-US"
+    });
+
+    assert.equal(response.markdown, "Hello from fallback");
+  } finally {
+    Object.defineProperty(globalThis, "AbortController", {
+      configurable: true,
+      value: originalAbortController
+    });
+  }
+});
+
+test("direct backend reports endpoint context for fetch-level network failures", async () => {
+  const backend = createBackend({
+    ...DEFAULT_SETTINGS,
+    apiAddress: "http://127.0.0.1:11434/v1",
+    directProvider: "openai-compatible"
+  }, {
+    fetch: async () => {
+      throw new TypeError("NetworkError when attempting to fetch resource.");
+    }
+  });
+
+  await assert.rejects(
+    backend.chat({
+      paper: {
+        itemID: 1,
+        title: "Sample",
+        authors: ["Jane Doe"],
+        year: "2026",
+        attachmentText: "Paper body"
+      },
+      messages: [{ role: "user", content: "Question" }],
+      mode: "followup",
+      locale: "en-US"
+    }),
+    /127\.0\.0\.1:11434|network|provider/i
+  );
+});

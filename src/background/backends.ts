@@ -142,11 +142,12 @@ async function chatDirect(
   }
 
   const endpoint = resolveDirectEndpoint(settings.directProvider, settings.apiAddress, settings.modelName);
-  const response = await fetchWithTimeout(
+  const response = await fetchDirectResponse(
     fetchImpl,
     endpoint,
     buildProviderChatRequest(settings.directProvider, settings, request.messages),
-    getRequestTimeoutMs(settings)
+    getRequestTimeoutMs(settings),
+    settings.directProvider
   );
   if (!response.ok) {
     throw new Error(await buildHttpErrorMessage(response, directProviderLabel(settings.directProvider)));
@@ -166,11 +167,12 @@ async function* streamDirect(
   fetchImpl: typeof fetch
 ): AsyncIterable<ChatStreamEvent> {
   const endpoint = resolveDirectEndpoint(settings.directProvider, settings.apiAddress, settings.modelName);
-  const response = await fetchWithTimeout(
+  const response = await fetchDirectResponse(
     fetchImpl,
     endpoint,
     buildProviderStreamRequest(settings.directProvider, settings, request.messages),
-    getRequestTimeoutMs(settings)
+    getRequestTimeoutMs(settings),
+    settings.directProvider
   );
   if (!response.ok) {
     throw new Error(await buildHttpErrorMessage(response, directProviderLabel(settings.directProvider)));
@@ -440,8 +442,13 @@ async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs: number
 ): Promise<Response> {
-  const controller = new AbortController();
   const timeoutMessage = getCurrentStrings().panel.requestTimedOut.replace("{ms}", String(timeoutMs));
+  const AbortControllerImpl = globalThis.AbortController;
+  if (typeof AbortControllerImpl !== "function") {
+    return await fetchWithFallbackTimeout(fetchImpl, input, init, timeoutMs, timeoutMessage);
+  }
+
+  const controller = new AbortControllerImpl();
   const timeoutId = setTimeout(() => controller.abort(timeoutMessage), timeoutMs);
 
   try {
@@ -456,5 +463,55 @@ async function fetchWithTimeout(
     throw error;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function fetchDirectResponse(
+  fetchImpl: typeof fetch,
+  endpoint: string,
+  init: RequestInit,
+  timeoutMs: number,
+  provider: DirectProvider
+): Promise<Response> {
+  try {
+    return await fetchWithTimeout(fetchImpl, endpoint, init, timeoutMs);
+  } catch (error) {
+    throw decorateFetchError(error, endpoint, provider);
+  }
+}
+
+function decorateFetchError(error: unknown, endpoint: string, provider: DirectProvider): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/timed out/i.test(message)) {
+    return error instanceof Error ? error : new Error(message);
+  }
+
+  return new Error([
+    `Network request failed for ${provider} provider.`,
+    `Endpoint: ${endpoint}`,
+    `Reason: ${message}`,
+    "Check that the API address is correct, the server is reachable, and Zotero trusts the TLS certificate if you are using HTTPS."
+  ].join(" "));
+}
+
+async function fetchWithFallbackTimeout(
+  fetchImpl: typeof fetch,
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<Response> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      fetchImpl(input, init),
+      new Promise<Response>((_resolve, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }
