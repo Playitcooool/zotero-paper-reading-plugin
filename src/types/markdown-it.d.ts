@@ -1,4 +1,4 @@
-declare module "markdown-it" {
+declare module "markdown-it/dist/index.cjs.js" {
   export default class MarkdownIt {
     constructor(options?: {
       html?: boolean;

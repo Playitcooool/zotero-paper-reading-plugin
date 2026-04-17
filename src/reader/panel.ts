@@ -1,5 +1,5 @@
 import type { ChatMessage, ChatSession, CitationRef, EvidenceReference } from "../background/types.ts";
-import MarkdownIt from "markdown-it";
+import MarkdownIt from "markdown-it/dist/index.cjs.js";
 import type { PluginStrings } from "../i18n/index.ts";
 import { getCurrentLocale } from "../i18n/index.ts";
 import { getResizedSidebarWidth, shouldAutoScrollTranscript } from "../runtime/reader-runtime.ts";
