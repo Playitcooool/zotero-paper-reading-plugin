@@ -654,6 +654,9 @@ class FixedSidebarHost implements ReaderPanelHost {
     this.doc.documentElement.style.setProperty("--zpr-sidebar-width", `${this.sidebarWidth}px`);
     if (this.root) {
       this.root.style.display = this.isHidden ? "none" : "block";
+      const topInset = this.isReaderDoc ? this.resolveReaderTopInset() : 0;
+      this.root.style.top = `${topInset}px`;
+      this.root.style.height = topInset > 0 ? `calc(100vh - ${topInset}px)` : "100vh";
     }
     if (this.isReaderDoc) {
       if (this.isHidden) {
@@ -687,6 +690,16 @@ class FixedSidebarHost implements ReaderPanelHost {
     style.id = "zpr-sidebar-style";
     style.textContent = getSidebarStyles();
     this.doc.documentElement.appendChild(style);
+  }
+
+  private resolveReaderTopInset(): number {
+    const askAIButton = this.doc.getElementById("zpr-ask-ai-button");
+    const toolbar = askAIButton?.closest(".toolbar, [role='toolbar'], header");
+    const bounds = toolbar?.getBoundingClientRect?.();
+    if (!bounds) {
+      return 0;
+    }
+    return Math.max(0, Math.round(bounds.bottom));
   }
 
   private renderTranscript(

@@ -386,9 +386,42 @@ test("reader panel host shows a notice when copy falls back and still fails", as
   }
 });
 
-function createPanelHarness() {
+test("reader panel host starts below the reader toolbar when the ask ai button is in the toolbar", async () => {
+  const { document, host, close } = createPanelHarness({ toolbarBottom: 52 });
+  try {
+    host.showChat(sampleSession, createHostHandlers(), { isBusy: false });
+
+    const root = document.getElementById("zpr-sidebar-root") as HTMLDivElement | null;
+    assert.ok(root);
+    assert.equal(root!.style.top, "52px");
+    assert.equal(root!.style.height, "calc(100vh - 52px)");
+  } finally {
+    await close();
+  }
+});
+
+function createPanelHarness(options: { toolbarBottom?: number } = {}) {
   const window = new Window();
   const { document } = window;
+  if (typeof options.toolbarBottom === "number") {
+    const toolbar = document.createElement("div");
+    toolbar.className = "toolbar";
+    toolbar.getBoundingClientRect = () => ({
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: options.toolbarBottom!,
+      width: 1000,
+      height: options.toolbarBottom!,
+      x: 0,
+      y: 0,
+      toJSON() { return {}; }
+    });
+    const button = document.createElement("button");
+    button.id = "zpr-ask-ai-button";
+    toolbar.appendChild(button);
+    document.body.appendChild(toolbar);
+  }
   const reader = {
     _iframeWindow: { document }
   } as unknown as _ZoteroTypes.ReaderInstance;
