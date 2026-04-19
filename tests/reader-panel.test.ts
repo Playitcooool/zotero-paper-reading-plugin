@@ -118,8 +118,11 @@ test("buildVisibleSessionMeta keeps only title and year for the live panel", () 
   });
 });
 
-test("buildPanelToolbarActions removes manual chat management actions", () => {
-  assert.deepEqual(buildPanelToolbarActions(getStringsForLocale("en-US")), []);
+test("buildPanelToolbarActions exposes regenerate and clear actions", () => {
+  assert.deepEqual(buildPanelToolbarActions(getStringsForLocale("en-US")), [
+    { id: "regenerate", label: "Regenerate" },
+    { id: "clear", label: "Clear chat", danger: true }
+  ]);
 });
 
 test("buildVisibleMessageMeta hides assistant labels and keeps the user label", () => {
@@ -233,6 +236,14 @@ test("getSidebarStyles includes edge-resize, unified composer colors, and stream
   assert.match(css, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.95\)/);
   assert.match(css, /@keyframes zpr-spin/);
   assert.match(css, /@keyframes zpr-stream-pulse/);
+});
+
+test("getSidebarStyles makes assistant output selectable and tables show grid lines", () => {
+  const css = getSidebarStyles();
+  assert.match(css, /\.zpr-message-body[^}]*user-select:\s*text/i);
+  assert.match(css, /\.zpr-message-body\s+table/i);
+  assert.match(css, /\.zpr-message-body\s+th,\s*\.zpr-message-body\s+td/i);
+  assert.match(css, /border:\s*1px/i);
 });
 
 test("buildSessionPlainText includes the conversation transcript", () => {

@@ -16,13 +16,13 @@ test("buildInitialChatMessages follows zh-CN locale", () => {
   const messages = buildInitialChatMessages(paper, "zh-CN");
   assert.match(messages[0].content, /Chinese/i);
   assert.match(messages[1].content, /Paper body/);
-  assert.doesNotMatch(messages[0].content, /deep reading/i);
-  assert.doesNotMatch(messages[1].content, /detailed first-pass interpretation/i);
-  assert.match(messages[1].content, /Core claim/i);
-  assert.match(messages[1].content, /Method in plain language/i);
-  assert.match(messages[1].content, /Reusable ideas/i);
-  assert.match(messages[1].content, /Evidence and limitations/i);
-  assert.match(messages[1].content, /450 English words|700 Chinese characters/i);
+  assert.match(messages[0].content, /Paraphrase/i);
+  assert.match(messages[0].content, /do not ask/i);
+  assert.match(messages[1].content, /一句话结论/);
+  assert.match(messages[1].content, /论文主旨/);
+  assert.match(messages[1].content, /核心方法/);
+  assert.match(messages[1].content, /证据与局限/);
+  assert.match(messages[1].content, /900 Chinese characters/i);
 });
 
 test("buildFollowupChatMessages keeps first answer and recent turns in balanced mode", () => {

@@ -7,7 +7,7 @@ import {
   prepareInitialChatStream,
   removePendingAssistantMessage
 } from "./background/orchestrator.ts";
-import { loadSavedChatSessionForAttachment, saveChatSessionForAttachment } from "./background/persistence.ts";
+import { deleteSavedChatSessionForAttachment, loadSavedChatSessionForAttachment, saveChatSessionForAttachment } from "./background/persistence.ts";
 import { DEFAULT_SETTINGS, getAllSettings, getSidebarWidth, setSetting, type PluginSettings } from "./background/settings-manager.ts";
 import { getCurrentStrings } from "./i18n/index.ts";
 import { initPreferencesDocument } from "./preferences/controller.ts";
@@ -143,16 +143,16 @@ async function handleRenderToolbar(event: _ZoteroTypes.Reader.EventParams<"rende
   button.className = "toolbar-button";
   button.type = "button";
   ensureAskAIButtonStyles(event.doc);
-  button.innerHTML = buildAskAIButtonMarkup(strings.toolbar.askAI);
+  button.innerHTML = buildAskAIButtonMarkup();
   button.setAttribute("aria-label", strings.toolbar.askAI);
   button.setAttribute("title", strings.toolbar.askAI);
   button.addEventListener("click", () => {
-    void openChatPanel(event.reader);
+    void openChatPanel(event.reader, event.doc);
   });
   event.append(button);
 }
 
-async function openChatPanel(reader: _ZoteroTypes.ReaderInstance): Promise<void> {
+async function openChatPanel(reader: _ZoteroTypes.ReaderInstance, docHint?: Document): Promise<void> {
   const attachment = getAttachmentForReader(reader);
   if (!attachment) {
     return;
@@ -162,8 +162,9 @@ async function openChatPanel(reader: _ZoteroTypes.ReaderInstance): Promise<void>
   const strings = getCurrentStrings();
   const settings = getAllSettings();
   const mainWindow = resolveMainWindow();
-  const sidebarWidth = resolveSidebarWidthForDocument(getSidebarWidth(settings), reader._iframeWindow?.document || mainWindow?.document || null);
-  const hostEntry = getOrCreatePanelHost(reader, sidebarWidth, mainWindow, strings);
+  const panelDoc = docHint || reader._iframeWindow?.document || mainWindow?.document || null;
+  const sidebarWidth = resolveSidebarWidthForDocument(getSidebarWidth(settings), panelDoc);
+  const hostEntry = getOrCreatePanelHost(reader, sidebarWidth, mainWindow, strings, docHint);
   const host = hostEntry.host;
   const state = getOrCreateReaderState(reader);
   state.isPanelVisible = true;
@@ -305,6 +306,12 @@ function renderPanelState(reader: _ZoteroTypes.ReaderInstance, host: ReaderPanel
     },
     onRetryFailedTurn: () => {
       void retryFailedTurn(reader);
+    },
+    onRegenerate: () => {
+      void regenerateSession(reader);
+    },
+    onClear: () => {
+      void clearSession(reader);
     }
   }, {
     notice: state.notice || undefined,
@@ -317,6 +324,60 @@ function renderPanelState(reader: _ZoteroTypes.ReaderInstance, host: ReaderPanel
         }
       : null
   });
+}
+
+function getPanelConfirmView(reader: _ZoteroTypes.ReaderInstance): Window | null {
+  const entry = panelHosts.get(getReaderKey(reader));
+  return entry?.doc.defaultView || null;
+}
+
+async function regenerateSession(reader: _ZoteroTypes.ReaderInstance): Promise<void> {
+  const state = panelState.get(getReaderKey(reader));
+  if (!state || state.bootstrapping || state.sendingFollowup || state.retryingTurnId) {
+    return;
+  }
+  const view = getPanelConfirmView(reader);
+  if (view && !view.confirm(getCurrentStrings().panel.regenerateConfirm)) {
+    return;
+  }
+  await startFreshSession(reader);
+}
+
+async function clearSession(reader: _ZoteroTypes.ReaderInstance): Promise<void> {
+  const attachment = getAttachmentForReader(reader);
+  if (!attachment) {
+    return;
+  }
+
+  const key = getReaderKey(reader);
+  const state = panelState.get(key);
+  const hostEntry = panelHosts.get(key);
+  const host = hostEntry?.host;
+  if (!state || !host) {
+    return;
+  }
+
+  const view = hostEntry?.doc.defaultView || null;
+  if (view && !view.confirm(getCurrentStrings().panel.clearConfirm)) {
+    return;
+  }
+
+  try {
+    await deleteSavedChatSessionForAttachment(attachment);
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error);
+    renderPanelState(reader, host, state);
+    return;
+  }
+
+  state.session = null;
+  state.bootstrapping = false;
+  state.sendingFollowup = false;
+  state.retryingTurnId = null;
+  state.panelError = null;
+  state.notice = null;
+  state.failedTurn = null;
+  renderPanelState(reader, host, state);
 }
 
 async function submitFollowup(reader: _ZoteroTypes.ReaderInstance, question: string): Promise<void> {
@@ -546,11 +607,12 @@ function getOrCreatePanelHost(
   reader: _ZoteroTypes.ReaderInstance,
   sidebarWidth: number,
   mainWindow: Window | null,
-  strings: ReturnType<typeof getCurrentStrings>
+  strings: ReturnType<typeof getCurrentStrings>,
+  docHint?: Document
 ): PanelHostEntry {
   const key = getReaderKey(reader);
   const existing = panelHosts.get(key);
-  const doc = resolvePanelDocument(reader, mainWindow);
+  const doc = resolvePanelDocument(reader, mainWindow, docHint);
   const resolvedSidebarWidth = resolveSidebarWidthForDocument(sidebarWidth, doc);
   const createHost = () => createReaderPanelHost(reader, resolvedSidebarWidth, mainWindow, strings, {
     onClose: () => {
@@ -574,7 +636,7 @@ function getOrCreatePanelHost(
       entry.sidebarWidth = safeWidth;
       entry.host.setWidth(safeWidth);
     }
-  });
+  }, docHint);
 
   if (!doc) {
     const host = createHost();
@@ -638,8 +700,12 @@ function resolveMainWindow(): Window | null {
   }
 }
 
-function resolvePanelDocument(reader: _ZoteroTypes.ReaderInstance, mainWindow: Window | null): Document | null {
-  return reader._iframeWindow?.document || mainWindow?.document || null;
+function resolvePanelDocument(
+  reader: _ZoteroTypes.ReaderInstance,
+  mainWindow: Window | null,
+  docHint?: Document
+): Document | null {
+  return docHint || reader._iframeWindow?.document || mainWindow?.document || null;
 }
 
 function resolveSidebarWidthForDocument(sidebarWidth: number, doc: Document | null): number {

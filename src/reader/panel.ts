@@ -33,6 +33,8 @@ export interface ReaderPanelHost {
       onReferenceClick: (reference: EvidenceReference) => void;
       onSubmit: (question: string) => void;
       onRetryFailedTurn?: () => void;
+      onRegenerate?: () => void;
+      onClear?: () => void;
     },
     options?: {
       notice?: string;
@@ -53,16 +55,15 @@ export function createReaderPanelHost(
   sidebarWidth: number,
   mainWindow: Window | null,
   strings: PluginStrings,
-  chromeHandlers: ReaderPanelChromeHandlers
+  chromeHandlers: ReaderPanelChromeHandlers,
+  docHint?: Document
 ): ReaderPanelHost {
-  const nativeDoc = reader._iframeWindow?.document || null;
-  if (nativeDoc) {
-    return new FixedSidebarHost(nativeDoc, sidebarWidth, true, strings, chromeHandlers);
+  const readerDoc = reader._iframeWindow?.document || null;
+  const doc = docHint || readerDoc || mainWindow?.document || null;
+  if (!doc) {
+    return new NoopPanelHost();
   }
-  if (mainWindow?.document) {
-    return new FixedSidebarHost(mainWindow.document, sidebarWidth, false, strings, chromeHandlers);
-  }
-  return new NoopPanelHost();
+  return new FixedSidebarHost(doc, sidebarWidth, doc === readerDoc, strings, chromeHandlers);
 }
 
 class FixedSidebarHost implements ReaderPanelHost {
@@ -118,7 +119,7 @@ class FixedSidebarHost implements ReaderPanelHost {
         </div>
       `;
       this.content = this.root.querySelector(".zpr-sidebar-content") as HTMLDivElement;
-      this.doc.documentElement.appendChild(this.root);
+      (this.doc.body || this.doc.documentElement).appendChild(this.root);
       this.root.querySelector('[data-zpr-action="close-panel"]')?.addEventListener("click", () => {
         this.chromeHandlers.onClose();
       });
@@ -207,6 +208,8 @@ class FixedSidebarHost implements ReaderPanelHost {
       onReferenceClick: (reference: EvidenceReference) => void;
       onSubmit: (question: string) => void;
       onRetryFailedTurn?: () => void;
+      onRegenerate?: () => void;
+      onClear?: () => void;
     },
     options: {
       notice?: string;
@@ -239,6 +242,18 @@ class FixedSidebarHost implements ReaderPanelHost {
         `<button type="button" class="zpr-toolbar-button${action.danger ? " zpr-toolbar-button-danger" : ""}" data-zpr-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>`
       )).join("")}</div>`;
       this.content.insertBefore(toolbar, this.content.firstChild);
+
+      toolbar.querySelector('[data-zpr-action="regenerate"]')?.addEventListener("click", () => {
+        handlers.onRegenerate?.();
+      });
+      toolbar.querySelector('[data-zpr-action="clear"]')?.addEventListener("click", () => {
+        handlers.onClear?.();
+      });
+    }
+
+    const toolbarButtons = Array.from(this.content.querySelectorAll(".zpr-result-head [data-zpr-action]")) as HTMLButtonElement[];
+    for (const button of toolbarButtons) {
+      button.disabled = isBusy;
     }
 
     this.notice.textContent = options.notice || "";
@@ -276,13 +291,6 @@ class FixedSidebarHost implements ReaderPanelHost {
       this.transcript.appendChild(error);
     }
 
-    this.draftValue = getComposerRenderValue({
-      storedDraft: this.draftValue,
-      liveInputValue: this.composerInput.value
-    });
-    if (this.composerInput.value !== this.draftValue) {
-      this.composerInput.value = this.draftValue;
-    }
     syncComposerDisabledState(this.composerInput, this.composerSendButton, isBusy);
     this.lastComposerBusy = isBusy;
 
@@ -422,9 +430,12 @@ class FixedSidebarHost implements ReaderPanelHost {
       return;
     }
 
+    if (input.value !== this.draftValue) {
+      input.value = this.draftValue;
+    }
+
     composer.addEventListener("submit", (event) => {
       event.preventDefault();
-      event.stopPropagation();
       const value = input.value.trim();
       if (!value || this.lastComposerBusy) {
         return;
@@ -435,30 +446,19 @@ class FixedSidebarHost implements ReaderPanelHost {
       this.currentSubmitHandler?.(value);
     });
 
-    const stopEventPropagation = (event: Event) => {
-      event.stopPropagation();
-    };
-
-    input.addEventListener("beforeinput", stopEventPropagation);
-    input.addEventListener("keyup", stopEventPropagation);
     input.addEventListener("input", (event) => {
-      event.stopPropagation();
       this.draftValue = input.value;
       syncComposerDisabledState(input, sendButton, this.lastComposerBusy);
     });
     input.addEventListener("compositionstart", (event) => {
-      event.stopPropagation();
       this.isComposerComposing = true;
     });
-    input.addEventListener("compositionupdate", stopEventPropagation);
     input.addEventListener("compositionend", (event) => {
-      event.stopPropagation();
       this.isComposerComposing = false;
       this.draftValue = input.value;
       syncComposerDisabledState(input, sendButton, this.lastComposerBusy);
     });
     input.addEventListener("keydown", (event) => {
-      event.stopPropagation();
       const keyboardEvent = event as KeyboardEvent;
       const action = getComposerKeyAction({
         key: keyboardEvent.key,
@@ -468,6 +468,7 @@ class FixedSidebarHost implements ReaderPanelHost {
       });
       if (action === "submit") {
         keyboardEvent.preventDefault();
+        keyboardEvent.stopPropagation();
         composer.requestSubmit();
       }
     });
@@ -772,6 +773,11 @@ export function getSidebarStyles(): string {
         line-height: 1.65;
         font-size: 13px;
       }
+      .zpr-message-body {
+        user-select: text;
+        -moz-user-select: text;
+        -webkit-user-select: text;
+      }
       .zpr-message-body p,
       .zpr-message-body ul,
       .zpr-message-body ol,
@@ -781,6 +787,22 @@ export function getSidebarStyles(): string {
       .zpr-message-body h2,
       .zpr-message-body h3 {
         margin: 0 0 10px;
+      }
+      .zpr-message-body table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+        font-size: 12px;
+      }
+      .zpr-message-body th,
+      .zpr-message-body td {
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        padding: 6px 8px;
+        vertical-align: top;
+      }
+      .zpr-message-body thead th {
+        background: rgba(241, 245, 249, 0.9);
+        font-weight: 700;
       }
       .zpr-message-body ul,
       .zpr-message-body ol {
@@ -962,7 +984,25 @@ class NoopPanelHost implements ReaderPanelHost {
   setWidth(): void {}
   showLoading(): void {}
   showEmpty(): void {}
-  showChat(): void {}
+  showChat(
+    _session: ChatSession,
+    _handlers: {
+      onReferenceClick: (reference: EvidenceReference) => void;
+      onSubmit: (question: string) => void;
+      onRetryFailedTurn?: () => void;
+      onRegenerate?: () => void;
+      onClear?: () => void;
+    },
+    _options?: {
+      notice?: string;
+      isBusy?: boolean;
+      failedTurn?: {
+        question: string;
+        errorMessage: string;
+        createdAt: string;
+      } | null;
+    }
+  ): void {}
   showError(): void {}
   dispose(): void {}
 }
@@ -1037,7 +1077,10 @@ export function buildVisibleSessionMeta(
 }
 
 export function buildPanelToolbarActions(_strings: PluginStrings): Array<{ id: string; label: string; danger?: boolean }> {
-  return [];
+  return [
+    { id: "regenerate", label: _strings.panel.regenerate },
+    { id: "clear", label: _strings.panel.clear, danger: true }
+  ];
 }
 
 export function buildVisibleMessageMeta(
@@ -1117,7 +1160,9 @@ function syncComposerDisabledState(
   if (!input || !sendButton) {
     return;
   }
-  input.disabled = isBusy;
+  // Keep the textarea editable while the assistant is streaming, so users can
+  // prepare the next question (including deleting/editing). We only disable sending.
+  input.disabled = false;
   sendButton.disabled = isBusy || !input.value.trim();
 }
 

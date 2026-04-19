@@ -4,8 +4,42 @@ function describeOutputLanguage(locale: string): string {
   return locale === "zh-CN" ? "Chinese" : "English";
 }
 
+function getInitialReadingSpec(locale: string): {
+  headings: string[];
+  lengthHint: string;
+} {
+  if (locale === "zh-CN") {
+    return {
+      headings: [
+        "一句话结论",
+        "论文主旨",
+        "核心方法（白话版）",
+        "关键直觉",
+        "可复用/可迁移点（落地建议）",
+        "证据与局限",
+        "启发与下一步"
+      ],
+      lengthHint: "Target no more than 900 Chinese characters unless the user explicitly asks for more depth."
+    };
+  }
+
+  return {
+    headings: [
+      "One-sentence takeaway",
+      "Core claim",
+      "Method in plain language",
+      "Key intuition",
+      "Implementation notes (what to steal)",
+      "Evidence & limitations",
+      "Inspiration / next experiments"
+    ],
+    lengthHint: "Target no more than 650 English words unless the user explicitly asks for more depth."
+  };
+}
+
 export function buildInitialChatMessages(paper: PaperContext, locale: string): LLMMessage[] {
   const outputLanguage = describeOutputLanguage(locale);
+  const spec = getInitialReadingSpec(locale);
 
   return [
     {
@@ -14,8 +48,10 @@ export function buildInitialChatMessages(paper: PaperContext, locale: string): L
         "You are an academic paper reading assistant.",
         `Answer in ${outputLanguage}.`,
         "Return markdown only.",
-        "Start with a balanced first-pass reading of the current paper.",
-        "Answer directly and keep the first pass concise but information-dense.",
+        "Start with a first-pass reading of the current paper that is deep but scannable.",
+        "Do NOT ask the user to provide a separate question or task. The task is to start the paper reading now.",
+        "Paraphrase and synthesize in your own words. Do NOT copy/paste sentences from the paper.",
+        "Avoid long quotes. If a quote is absolutely necessary, keep it very short and clearly mark it as a quote.",
         "When possible, cite figures, tables, and page numbers using tokens like [Fig. 2], [Table 1], or [p. 5].",
         "If evidence is uncertain, say so plainly."
       ].join("\n")
@@ -23,10 +59,11 @@ export function buildInitialChatMessages(paper: PaperContext, locale: string): L
     {
       role: "user",
       content: [
-        "Read this paper and produce a balanced first-pass interpretation.",
-        "Use exactly these section headings: Core claim, Method in plain language, Reusable ideas, Evidence and limitations.",
-        "Keep each section to 1-3 short bullets or short sentences.",
-        "Target no more than 450 English words or 700 Chinese characters unless the user explicitly asks for more depth.",
+        "Read this paper and produce a deep-but-scannable first-pass reading.",
+        `Use exactly these section headings: ${spec.headings.join(", ")}.`,
+        "Keep each section to 2-4 short bullets (or 1-2 short sentences), focusing on what matters for understanding and reuse.",
+        "Be concrete and actionable where possible (e.g., what to reuse in implementation, what to test next).",
+        spec.lengthHint,
         "",
         buildPaperPayload(paper, true)
       ].join("\n")
@@ -60,6 +97,7 @@ export function buildFollowupChatMessages(input: {
         "Return markdown only.",
         "Answer directly first, then expand only when the user asks for more depth.",
         "Stay grounded in this paper and the existing conversation.",
+        "Paraphrase in your own words. Do NOT copy/paste sentences from the paper.",
         "When possible, cite figures, tables, and page numbers using tokens like [Fig. 2], [Table 1], or [p. 5].",
         "If the user asks beyond what the paper supports, say so."
       ].join("\n")
