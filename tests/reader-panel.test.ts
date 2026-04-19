@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Window } from "happy-dom";
 
 import {
   buildPanelToolbarActions,
@@ -8,6 +9,7 @@ import {
   getComposerKeyAction,
   getComposerRenderValue,
   buildVisibleMessageMeta,
+  createReaderPanelHost,
   getSidebarStyles,
   shouldShowMessageCopyButton,
   buildVisibleSessionMeta,
@@ -242,13 +244,23 @@ test("getSidebarStyles makes the panel selectable, keeps controls exempt, and sh
   const css = getSidebarStyles();
   assert.doesNotMatch(css, /#zpr-sidebar-root[^}]*pointer-events:\s*none/i);
   assert.match(css, /#zpr-sidebar-root[^}]*pointer-events:\s*auto/i);
-  assert.match(css, /#zpr-sidebar-root,\s*#zpr-sidebar-root \*[^}]*user-select:\s*text\s*!important/i);
+  assert.match(css, /\.zpr-chat-list,\s*\.zpr-message,\s*\.zpr-meta,\s*\.zpr-notice[^}]*user-select:\s*text\s*!important/i);
   assert.match(css, /\.zpr-sidebar-resize[^}]*user-select:\s*none\s*!important/i);
   assert.match(css, /\.zpr-close-button[^}]*user-select:\s*none\s*!important/i);
   assert.match(css, /\.zpr-text-button[^}]*user-select:\s*none\s*!important/i);
   assert.match(css, /\.zpr-message-body\s+table/i);
   assert.match(css, /\.zpr-message-body\s+th,\s*\.zpr-message-body\s+td/i);
   assert.match(css, /border:\s*1px/i);
+});
+
+test("getSidebarStyles includes focus-visible states for keyboard navigation", () => {
+  const css = getSidebarStyles();
+  assert.match(css, /\.zpr-close-button:focus-visible/);
+  assert.match(css, /\.zpr-toolbar-button:focus-visible/);
+  assert.match(css, /\.zpr-text-button:focus-visible/);
+  assert.match(css, /\.zpr-jump-button:focus-visible/);
+  assert.match(css, /\.zpr-composer-send:focus-visible/);
+  assert.match(css, /\.zpr-suggestion-button:focus-visible/);
 });
 
 test("buildSessionPlainText includes the conversation transcript", () => {
@@ -268,3 +280,149 @@ test("getSuggestedQuestions returns localized starter prompts", () => {
   assert.match(zh[0], /论文|贡献|核心/);
   assert.match(en[0], /core contribution/i);
 });
+
+test("reader panel host mounts complementary semantics for assistive tech", async () => {
+  const { document, close } = createPanelHarness();
+  try {
+    const root = document.getElementById("zpr-sidebar-root");
+    const title = document.querySelector(".zpr-sidebar-title");
+
+    assert.equal(root?.getAttribute("role"), "complementary");
+    assert.equal(root?.getAttribute("aria-labelledby"), title?.id || null);
+    assert.ok(title?.id);
+  } finally {
+    await close();
+  }
+});
+
+test("reader panel host preserves toolbar focus when streaming settles", async () => {
+  const { document, host, close } = createPanelHarness();
+  try {
+    const handlers = createHostHandlers();
+
+    host.showChat(sampleSession, handlers, { isBusy: true });
+
+    const toolbarButton = document.querySelector('[data-zpr-action="regenerate"]') as HTMLButtonElement | null;
+    const composerInput = document.querySelector(".zpr-composer-input") as HTMLTextAreaElement | null;
+    assert.ok(toolbarButton);
+    assert.ok(composerInput);
+    let focusCalls = 0;
+    composerInput!.focus = () => {
+      focusCalls += 1;
+    };
+    Object.defineProperty(document, "activeElement", {
+      configurable: true,
+      get: () => toolbarButton
+    });
+
+    host.showChat(sampleSession, handlers, { isBusy: false });
+
+    assert.equal(focusCalls, 0);
+  } finally {
+    await close();
+  }
+});
+
+test("reader panel host reuses existing message nodes across chat refreshes", async () => {
+  const { document, host, close } = createPanelHarness();
+  try {
+    const handlers = createHostHandlers();
+
+    host.showChat(sampleSession, handlers, { isBusy: true });
+    const firstNode = document.querySelector(".zpr-message-assistant") as HTMLDivElement | null;
+    assert.ok(firstNode);
+
+    host.showChat({
+      ...sampleSession,
+      updatedAt: "2026-04-16T10:01:00.000Z",
+      messages: [
+        {
+          ...sampleSession.messages[0],
+          markdown: "# Thesis\n\nA concise summary with [Fig. 2], [p. 5], and one more sentence.",
+          status: "pending"
+        }
+      ]
+    }, handlers, { isBusy: true });
+
+    const secondNode = document.querySelector(".zpr-message-assistant") as HTMLDivElement | null;
+    assert.equal(secondNode, firstNode);
+  } finally {
+    await close();
+  }
+});
+
+test("reader panel host shows a notice when copy falls back and still fails", async () => {
+  const { document, host, window, close } = createPanelHarness();
+  try {
+    const handlers = createHostHandlers();
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: {
+        async writeText() {
+          throw new Error("clipboard denied");
+        }
+      } satisfies Partial<Clipboard>
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: () => false
+    });
+
+    host.showChat(sampleSession, handlers, { isBusy: false });
+
+    const copyButton = document.querySelector('[data-zpr-message-copy="m1"]') as HTMLButtonElement | null;
+    const notice = document.querySelector(".zpr-notice") as HTMLDivElement | null;
+    assert.ok(copyButton);
+    assert.ok(notice);
+
+    copyButton!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(notice!.textContent, "Copy failed. Please select the text and copy it manually.");
+    assert.equal(notice!.style.display, "block");
+  } finally {
+    await close();
+  }
+});
+
+function createPanelHarness() {
+  const window = new Window();
+  const { document } = window;
+  const reader = {
+    _iframeWindow: { document }
+  } as unknown as _ZoteroTypes.ReaderInstance;
+  const host = createReaderPanelHost(
+    reader,
+    420,
+    window as unknown as Window,
+    getStringsForLocale("en-US"),
+    {
+      onClose() {},
+      onResize() {}
+    }
+  );
+
+  assert.equal(host.mount(), true);
+
+  return {
+    window,
+    document,
+    host,
+    close: async () => {
+      host.dispose();
+      window.close();
+      await window.happyDOM.abort();
+    }
+  };
+}
+
+function createHostHandlers() {
+  return {
+    onReferenceClick() {},
+    onSubmit() {},
+    onRetryFailedTurn() {},
+    onRegenerate() {},
+    onClear() {}
+  };
+}

@@ -97,6 +97,8 @@ class FixedSidebarHost implements ReaderPanelHost {
   private composer: HTMLFormElement | null = null;
   private composerInput: HTMLTextAreaElement | null = null;
   private composerSendButton: HTMLButtonElement | null = null;
+  private readonly messageNodes = new Map<string, HTMLDivElement>();
+  private failedTurnNode: HTMLDivElement | null = null;
   private draftValue = "";
   private isComposerComposing = false;
   private lastComposerBusy = false;
@@ -125,11 +127,13 @@ class FixedSidebarHost implements ReaderPanelHost {
     if (!this.root) {
       this.root = this.doc.createElement("div");
       this.root.id = "zpr-sidebar-root";
+      this.root.setAttribute("role", "complementary");
+      this.root.setAttribute("aria-labelledby", "zpr-sidebar-title");
       this.root.innerHTML = `
         <div class="zpr-sidebar-resize" data-zpr-action="resize" aria-hidden="true"></div>
         <div class="zpr-sidebar-card">
           <div class="zpr-sidebar-head">
-            <div class="zpr-sidebar-title">${escapeHtml(this.strings.panel.title)}</div>
+            <div class="zpr-sidebar-title" id="zpr-sidebar-title">${escapeHtml(this.strings.panel.title)}</div>
             <button type="button" class="zpr-close-button" data-zpr-action="close-panel" aria-label="${escapeHtml(this.strings.panel.close)}" title="${escapeHtml(this.strings.panel.close)}">×</button>
           </div>
           <div class="zpr-sidebar-content"></div>
@@ -246,6 +250,7 @@ class FixedSidebarHost implements ReaderPanelHost {
     const previousScrollTop = this.autoScroll ? 0 : this.lastManualScrollTop;
     const isBusy = Boolean(options.isBusy);
     const wasBusy = this.lastComposerBusy;
+    const activeElement = this.doc.activeElement;
     this.currentSubmitHandler = handlers.onSubmit;
     this.ensureChatView();
     if (!this.content || !this.notice || !this.meta || !this.transcript || !this.jumpButton || !this.composerInput || !this.composerSendButton) {
@@ -274,8 +279,7 @@ class FixedSidebarHost implements ReaderPanelHost {
       button.disabled = isBusy;
     }
 
-    this.notice.textContent = options.notice || "";
-    this.notice.style.display = options.notice ? "block" : "none";
+    this.setNotice(options.notice || null);
 
     const visibleMeta = buildVisibleSessionMeta(session, this.strings);
     this.meta.innerHTML = `
@@ -283,31 +287,8 @@ class FixedSidebarHost implements ReaderPanelHost {
       ${visibleMeta.detail ? `<div class="zpr-meta-subtitle">${escapeHtml(visibleMeta.detail)}</div>` : ""}
     `;
 
-    this.transcript.innerHTML = "";
-    for (const message of session.messages) {
-      if (message.role === "system") {
-        continue;
-      }
-      this.transcript.appendChild(this.buildMessageBubble(message, handlers.onReferenceClick));
-    }
-
-    if (options.failedTurn) {
-      const error = this.doc.createElement("div");
-      error.className = "zpr-message zpr-message-assistant zpr-message-error";
-      error.innerHTML = `
-        <div class="zpr-message-meta">
-          <div class="zpr-message-time">${escapeHtml(formatMessageTimestamp(options.failedTurn.createdAt))}</div>
-        </div>
-        <div class="zpr-pending">${escapeHtml(options.failedTurn.errorMessage)}</div>
-        <div class="zpr-message-actions">
-          <button type="button" class="zpr-text-button" data-zpr-action="retry-turn">${escapeHtml(this.strings.panel.retryTurn)}</button>
-        </div>
-      `;
-      error.querySelector('[data-zpr-action="retry-turn"]')?.addEventListener("click", () => {
-        handlers.onRetryFailedTurn?.();
-      });
-      this.transcript.appendChild(error);
-    }
+    this.renderTranscript(session.messages, handlers.onReferenceClick);
+    this.renderFailedTurn(options.failedTurn, handlers.onRetryFailedTurn);
 
     syncComposerDisabledState(this.composerInput, this.composerSendButton, isBusy);
     this.lastComposerBusy = isBusy;
@@ -321,7 +302,8 @@ class FixedSidebarHost implements ReaderPanelHost {
     if (getComposerFocusBehavior({
       wasBusy,
       isBusy,
-      isInputFocused: this.doc.activeElement === this.composerInput
+      isInputFocused: activeElement === this.composerInput,
+      preserveExistingFocus: this.shouldPreserveExistingFocus(activeElement)
     }) === "focus") {
       this.composerInput.focus();
     }
@@ -357,6 +339,8 @@ class FixedSidebarHost implements ReaderPanelHost {
     this.composerInput = null;
     this.composerSendButton = null;
     this.currentSubmitHandler = null;
+    this.messageNodes.clear();
+    this.failedTurnNode = null;
   }
 
   private installGlobalIsolation(): void {
@@ -454,7 +438,17 @@ class FixedSidebarHost implements ReaderPanelHost {
 
   private buildMessageBubble(message: ChatMessage, onReferenceClick: (reference: EvidenceReference) => void): HTMLDivElement {
     const bubble = this.doc.createElement("div");
+    this.renderMessageBubble(bubble, message, onReferenceClick);
+    return bubble;
+  }
+
+  private renderMessageBubble(
+    bubble: HTMLDivElement,
+    message: ChatMessage,
+    onReferenceClick: (reference: EvidenceReference) => void
+  ): void {
     bubble.className = `zpr-message zpr-message-${message.role}${getMessageBubbleStateClasses(message).map((name) => ` ${name}`).join("")}`;
+    bubble.setAttribute("data-zpr-message-id", message.id);
     const bodyHtml = message.role === "assistant" && !message.markdown.trim() && message.status === "pending"
       ? buildPendingIndicatorMarkup(this.strings)
       : `<div class="zpr-message-body">${renderMarkdownToHtml(message.markdown, message.citations)}</div>`;
@@ -471,13 +465,8 @@ class FixedSidebarHost implements ReaderPanelHost {
 
     const copyButton = bubble.querySelector(`[data-zpr-message-copy="${escapeHtml(message.id)}"]`) as HTMLButtonElement | null;
     copyButton?.addEventListener("click", () => {
-      void copyText(this.doc, message.markdown).then((copied) => {
-        if (copied && copyButton) {
-          flashCopiedLabel(this.doc, copyButton, this.strings.panel.copyMessage, this.strings.panel.copied);
-        }
-      });
+      void this.handleCopyMessage(copyButton, message.markdown);
     });
-    return bubble;
   }
 
   private ensureChatView(): void {
@@ -494,6 +483,8 @@ class FixedSidebarHost implements ReaderPanelHost {
     const notice = this.doc.createElement("div");
     notice.className = "zpr-notice";
     notice.style.display = "none";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
     this.content.appendChild(notice);
     this.notice = notice;
 
@@ -533,7 +524,7 @@ class FixedSidebarHost implements ReaderPanelHost {
     const composer = this.doc.createElement("form");
     composer.className = "zpr-composer";
     composer.innerHTML = `
-      <textarea class="zpr-composer-input" placeholder="${escapeHtml(this.strings.panel.composerPlaceholder)}"></textarea>
+      <textarea class="zpr-composer-input" aria-label="${escapeHtml(this.strings.panel.composerPlaceholder)}" placeholder="${escapeHtml(this.strings.panel.composerPlaceholder)}"></textarea>
       <button type="submit" class="zpr-composer-send">${escapeHtml(this.strings.panel.send)}</button>
     `;
     const input = composer.querySelector(".zpr-composer-input") as HTMLTextAreaElement | null;
@@ -651,6 +642,8 @@ class FixedSidebarHost implements ReaderPanelHost {
     this.composerInput = null;
     this.composerSendButton = null;
     this.currentSubmitHandler = null;
+    this.messageNodes.clear();
+    this.failedTurnNode = null;
     this.isComposerComposing = false;
     this.lastComposerBusy = false;
     this.autoScroll = true;
@@ -694,6 +687,99 @@ class FixedSidebarHost implements ReaderPanelHost {
     style.id = "zpr-sidebar-style";
     style.textContent = getSidebarStyles();
     this.doc.documentElement.appendChild(style);
+  }
+
+  private renderTranscript(
+    messages: ChatMessage[],
+    onReferenceClick: (reference: EvidenceReference) => void
+  ): void {
+    if (!this.transcript) {
+      return;
+    }
+
+    const visibleMessages = messages.filter((message) => message.role !== "system");
+    const visibleIds = new Set(visibleMessages.map((message) => message.id));
+    for (const [messageId, node] of this.messageNodes) {
+      if (visibleIds.has(messageId)) {
+        continue;
+      }
+      node.remove();
+      this.messageNodes.delete(messageId);
+    }
+
+    for (const message of visibleMessages) {
+      const existing = this.messageNodes.get(message.id);
+      const bubble = existing || this.doc.createElement("div");
+      this.renderMessageBubble(bubble, message, onReferenceClick);
+      this.messageNodes.set(message.id, bubble);
+      this.transcript.appendChild(bubble);
+    }
+  }
+
+  private renderFailedTurn(
+    failedTurn: {
+      question: string;
+      errorMessage: string;
+      createdAt: string;
+    } | null | undefined,
+    onRetryFailedTurn?: () => void
+  ): void {
+    if (!this.transcript) {
+      return;
+    }
+    if (!failedTurn) {
+      this.failedTurnNode?.remove();
+      this.failedTurnNode = null;
+      return;
+    }
+
+    const error = this.failedTurnNode || this.doc.createElement("div");
+    error.className = "zpr-message zpr-message-assistant zpr-message-error";
+    error.innerHTML = `
+      <div class="zpr-message-meta">
+        <div></div>
+        <div class="zpr-message-time">${escapeHtml(formatMessageTimestamp(failedTurn.createdAt))}</div>
+      </div>
+      <div class="zpr-pending" role="status" aria-live="polite">${escapeHtml(failedTurn.errorMessage)}</div>
+      <div class="zpr-message-actions">
+        <button type="button" class="zpr-text-button" data-zpr-action="retry-turn">${escapeHtml(this.strings.panel.retryTurn)}</button>
+      </div>
+    `;
+    error.querySelector('[data-zpr-action="retry-turn"]')?.addEventListener("click", () => {
+      onRetryFailedTurn?.();
+    });
+    this.transcript.appendChild(error);
+    this.failedTurnNode = error;
+  }
+
+  private setNotice(message: string | null): void {
+    if (!this.notice) {
+      return;
+    }
+    this.notice.textContent = message || "";
+    this.notice.style.display = message ? "block" : "none";
+  }
+
+  private async handleCopyMessage(button: HTMLButtonElement | null, value: string): Promise<void> {
+    const copied = await copyText(this.doc, value);
+    if (!button) {
+      return;
+    }
+    if (copied) {
+      flashCopiedLabel(this.doc, button, this.strings.panel.copyMessage, this.strings.panel.copied);
+      return;
+    }
+    this.setNotice(this.strings.panel.copyFailed);
+  }
+
+  private shouldPreserveExistingFocus(activeElement: Element | null): boolean {
+    if (!activeElement || !this.root) {
+      return false;
+    }
+    if (!this.root.contains(activeElement)) {
+      return false;
+    }
+    return activeElement !== this.composerInput;
   }
 }
 
@@ -763,6 +849,19 @@ export function getSidebarStyles(): string {
         user-select: none !important;
         -moz-user-select: none !important;
         -webkit-user-select: none !important;
+      }
+      .zpr-close-button:focus-visible,
+      .zpr-toolbar-button:focus-visible,
+      .zpr-text-button:focus-visible,
+      .zpr-jump-button:focus-visible,
+      .zpr-composer-send:focus-visible,
+      .zpr-primary-button:focus-visible,
+      .zpr-suggestion-button:focus-visible,
+      .zpr-reference-button:focus-visible,
+      .zpr-citation-button:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+        border-radius: 12px;
       }
       .zpr-sidebar-content {
         flex: 1;
@@ -908,12 +1007,6 @@ export function getSidebarStyles(): string {
         line-height: 1.65;
         font-size: 13px;
       }
-      #zpr-sidebar-root,
-      #zpr-sidebar-root * {
-        user-select: text !important;
-        -moz-user-select: text !important;
-        -webkit-user-select: text !important;
-      }
       .zpr-message-body {
         user-select: text !important;
         -moz-user-select: text !important;
@@ -983,6 +1076,14 @@ export function getSidebarStyles(): string {
         display: flex;
         gap: 8px;
         margin-top: 10px;
+      }
+      .zpr-chat-list,
+      .zpr-message,
+      .zpr-meta,
+      .zpr-notice {
+        user-select: text !important;
+        -moz-user-select: text !important;
+        -webkit-user-select: text !important;
       }
       .zpr-text-button {
         border: none;
@@ -1056,6 +1157,11 @@ export function getSidebarStyles(): string {
         outline: none;
         border-color: rgba(100, 116, 139, 0.55);
         box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.15);
+      }
+      .zpr-composer-input:focus-visible {
+        outline: none;
+        border-color: rgba(37, 99, 235, 0.48);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
       }
       .zpr-composer-send {
         align-self: end;
@@ -1258,7 +1364,7 @@ export function shouldShowMessageCopyButton(message: ChatMessage): boolean {
 }
 
 export function buildPendingIndicatorMarkup(strings: PluginStrings): string {
-  return `<div class="zpr-pending"><span class="zpr-spinner" aria-hidden="true"></span><span>${escapeHtml(strings.panel.thinking)}</span></div>`;
+  return `<div class="zpr-pending" role="status" aria-live="polite"><span class="zpr-spinner" aria-hidden="true"></span><span>${escapeHtml(strings.panel.thinking)}</span></div>`;
 }
 
 export function getComposerKeyAction(args: {
@@ -1290,8 +1396,9 @@ export function getComposerFocusBehavior(args: {
   wasBusy: boolean;
   isBusy: boolean;
   isInputFocused: boolean;
+  preserveExistingFocus?: boolean;
 }): "focus" | "preserve" {
-  if (args.isBusy || args.isInputFocused) {
+  if (args.isBusy || args.isInputFocused || args.preserveExistingFocus) {
     return "preserve";
   }
   return "focus";
@@ -1346,8 +1453,12 @@ function formatMessageTimestamp(value: string): string {
 async function copyText(doc: Document, value: string): Promise<boolean> {
   const clipboard = doc.defaultView?.navigator?.clipboard;
   if (clipboard?.writeText) {
-    await clipboard.writeText(value);
-    return true;
+    try {
+      await clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fall back to execCommand below.
+    }
   }
 
   const textarea = doc.createElement("textarea");
@@ -1359,6 +1470,8 @@ async function copyText(doc: Document, value: string): Promise<boolean> {
   textarea.select();
   try {
     return Boolean(doc.execCommand?.("copy"));
+  } catch {
+    return false;
   } finally {
     textarea.remove();
   }

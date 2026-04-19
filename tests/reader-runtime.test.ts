@@ -54,6 +54,7 @@ test("clampSidebarWidth keeps the panel within fixed bounds and viewport slack",
   assert.equal(clampSidebarWidth(500, 1200), 500);
   assert.equal(clampSidebarWidth(1400, 1200), 1104);
   assert.equal(clampSidebarWidth(900, 900), 804);
+  assert.equal(clampSidebarWidth(420, 320), 224);
 });
 
 test("shouldAutoScrollTranscript pauses when the user scrolls away from the bottom", () => {

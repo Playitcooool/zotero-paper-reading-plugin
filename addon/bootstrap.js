@@ -65,8 +65,8 @@ async function onMainWindowUnload({ window }) {
   Zotero.ZoteroPaperReading?.hooks?.onMainWindowUnload?.(window);
 }
 
-function shutdown() {
-  if (typeof APP_SHUTDOWN !== "undefined" && APP_SHUTDOWN) {
+function shutdown(_data, reason) {
+  if (typeof APP_SHUTDOWN !== "undefined" && reason === APP_SHUTDOWN) {
     return;
   }
 
@@ -85,6 +85,9 @@ function shutdown() {
     chromeHandle.destruct();
     chromeHandle = null;
   }
+
+  delete Zotero.ZoteroPaperReading;
+  delete globalThis.rootURI;
 }
 
 function uninstall() {}

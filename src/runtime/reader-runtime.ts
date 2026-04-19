@@ -53,7 +53,13 @@ export function shouldRecreatePanelHost(
 }
 
 export function clampSidebarWidth(width: number, viewportWidth: number): number {
-  const viewportMax = Math.max(MIN_SIDEBAR_WIDTH, viewportWidth - VIEWPORT_SLACK);
+  const viewportMax = Math.max(0, viewportWidth - VIEWPORT_SLACK);
+  if (viewportMax <= 0) {
+    return 0;
+  }
+  if (viewportMax < MIN_SIDEBAR_WIDTH) {
+    return Math.min(Math.max(width, 0), viewportMax);
+  }
   return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), viewportMax);
 }
 

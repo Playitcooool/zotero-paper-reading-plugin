@@ -35,6 +35,7 @@ export interface PluginStrings {
     regenerate: string;
     clear: string;
     copyMessage: string;
+    copyFailed: string;
     retryTurn: string;
     close: string;
     jumpToLatest: string;
@@ -113,6 +114,7 @@ const ZH_CN: PluginStrings = {
     regenerate: "重新生成",
     clear: "清空会话",
     copyMessage: "复制本条",
+    copyFailed: "复制失败，请手动选择内容后再复制。",
     retryTurn: "重试这一轮",
     close: "关闭面板",
     jumpToLatest: "跳到最新内容",
@@ -204,6 +206,7 @@ const EN_US: PluginStrings = {
     regenerate: "Regenerate",
     clear: "Clear chat",
     copyMessage: "Copy message",
+    copyFailed: "Copy failed. Please select the text and copy it manually.",
     retryTurn: "Retry turn",
     close: "Close panel",
     jumpToLatest: "Jump to latest",
