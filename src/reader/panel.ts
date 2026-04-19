@@ -120,6 +120,10 @@ class FixedSidebarHost implements ReaderPanelHost {
       `;
       this.content = this.root.querySelector(".zpr-sidebar-content") as HTMLDivElement;
       (this.doc.body || this.doc.documentElement).appendChild(this.root);
+      // Some host documents disable selection globally; keep selection working inside the panel.
+      this.root.addEventListener("selectstart", (event) => {
+        event.stopPropagation();
+      });
       this.root.querySelector('[data-zpr-action="close-panel"]')?.addEventListener("click", () => {
         this.chromeHandlers.onClose();
       });
@@ -450,6 +454,10 @@ class FixedSidebarHost implements ReaderPanelHost {
       this.draftValue = input.value;
       syncComposerDisabledState(input, sendButton, this.lastComposerBusy);
     });
+    input.addEventListener("keyup", (event) => {
+      // Prevent global reader shortcuts from stealing focus on keyup.
+      event.stopPropagation();
+    });
     input.addEventListener("compositionstart", (event) => {
       this.isComposerComposing = true;
     });
@@ -460,6 +468,9 @@ class FixedSidebarHost implements ReaderPanelHost {
     });
     input.addEventListener("keydown", (event) => {
       const keyboardEvent = event as KeyboardEvent;
+      // Prevent global reader shortcuts from seeing key presses while focused in the composer
+      // (e.g. Delete/Backspace triggering blur or navigation).
+      keyboardEvent.stopPropagation();
       const action = getComposerKeyAction({
         key: keyboardEvent.key,
         shiftKey: keyboardEvent.shiftKey,
@@ -468,7 +479,6 @@ class FixedSidebarHost implements ReaderPanelHost {
       });
       if (action === "submit") {
         keyboardEvent.preventDefault();
-        keyboardEvent.stopPropagation();
         composer.requestSubmit();
       }
     });
@@ -597,6 +607,9 @@ export function getSidebarStyles(): string {
         width: 24px;
         cursor: col-resize;
         pointer-events: auto;
+        user-select: none !important;
+        -moz-user-select: none !important;
+        -webkit-user-select: none !important;
       }
       .zpr-sidebar-card {
         pointer-events: auto;
@@ -774,9 +787,14 @@ export function getSidebarStyles(): string {
         font-size: 13px;
       }
       .zpr-message-body {
-        user-select: text;
-        -moz-user-select: text;
-        -webkit-user-select: text;
+        user-select: text !important;
+        -moz-user-select: text !important;
+        -webkit-user-select: text !important;
+      }
+      .zpr-message-body * {
+        user-select: text !important;
+        -moz-user-select: text !important;
+        -webkit-user-select: text !important;
       }
       .zpr-message-body p,
       .zpr-message-body ul,

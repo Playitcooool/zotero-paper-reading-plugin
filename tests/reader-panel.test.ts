@@ -240,7 +240,8 @@ test("getSidebarStyles includes edge-resize, unified composer colors, and stream
 
 test("getSidebarStyles makes assistant output selectable and tables show grid lines", () => {
   const css = getSidebarStyles();
-  assert.match(css, /\.zpr-message-body[^}]*user-select:\s*text/i);
+  assert.match(css, /\.zpr-message-body[^}]*user-select:\s*text\s*!important/i);
+  assert.match(css, /\.zpr-message-body \*[^}]*user-select:\s*text\s*!important/i);
   assert.match(css, /\.zpr-message-body\s+table/i);
   assert.match(css, /\.zpr-message-body\s+th,\s*\.zpr-message-body\s+td/i);
   assert.match(css, /border:\s*1px/i);
