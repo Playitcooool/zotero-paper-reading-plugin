@@ -11,13 +11,12 @@ function getInitialReadingSpec(locale: string): {
   if (locale === "zh-CN") {
     return {
       headings: [
-        "一句话结论",
-        "论文主旨",
-        "核心方法（白话版）",
-        "关键直觉",
-        "可复用/可迁移点（落地建议）",
-        "证据与局限",
-        "启发与下一步"
+        "核心贡献（1-2 条主张）",
+        "方法概览（真正的新意）",
+        "证据与可信度",
+        "局限与失效场景",
+        "关键对比与定位",
+        "开放问题与下一步实验"
       ],
       lengthHint: "Target no more than 900 Chinese characters unless the user explicitly asks for more depth."
     };
@@ -25,15 +24,14 @@ function getInitialReadingSpec(locale: string): {
 
   return {
     headings: [
-      "One-sentence takeaway",
-      "Core claim",
-      "Method in plain language",
-      "Key intuition",
-      "Implementation notes (what to steal)",
-      "Evidence & limitations",
-      "Inspiration / next experiments"
+      "Core contribution (1-2 claims)",
+      "Method overview (what is actually new)",
+      "Evidence & credibility",
+      "Limitations & failure modes",
+      "Key comparisons / related-work positioning",
+      "Open questions / next experiments"
     ],
-    lengthHint: "Target no more than 650 English words unless the user explicitly asks for more depth."
+      lengthHint: "Target no more than 650 English words unless the user explicitly asks for more depth."
   };
 }
 
@@ -52,6 +50,8 @@ export function buildInitialChatMessages(paper: PaperContext, locale: string): L
         "Do NOT ask the user to provide a separate question or task. The task is to start the paper reading now.",
         "Paraphrase and synthesize in your own words. Do NOT copy/paste sentences from the paper.",
         "Avoid long quotes. If a quote is absolutely necessary, keep it very short and clearly mark it as a quote.",
+        "For each major claim, label the support as Strong / Medium / Weak based only on evidence available in the paper text.",
+        "If support for a claim is missing in the provided text, say 'Not supported in provided text'.",
         "When possible, cite figures, tables, and page numbers using tokens like [Fig. 2], [Table 1], or [p. 5].",
         "If evidence is uncertain, say so plainly."
       ].join("\n")
@@ -59,10 +59,10 @@ export function buildInitialChatMessages(paper: PaperContext, locale: string): L
     {
       role: "user",
       content: [
-        "Read this paper and produce a deep-but-scannable first-pass reading.",
+        "Read this paper and produce a researcher-oriented first-pass reading.",
         `Use exactly these section headings: ${spec.headings.join(", ")}.`,
-        "Keep each section to 2-4 short bullets (or 1-2 short sentences), focusing on what matters for understanding and reuse.",
-        "Be concrete and actionable where possible (e.g., what to reuse in implementation, what to test next).",
+        "Keep each section to 2-4 short bullets (or 1-2 short sentences), focusing on claims, evidence, limitations, and what is actually new.",
+        "Be concrete about what the paper demonstrates, what remains uncertain, and which claims are weakly supported.",
         spec.lengthHint,
         "",
         buildPaperPayload(paper, true)

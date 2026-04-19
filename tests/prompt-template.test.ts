@@ -18,11 +18,27 @@ test("buildInitialChatMessages follows zh-CN locale", () => {
   assert.match(messages[1].content, /Paper body/);
   assert.match(messages[0].content, /Paraphrase/i);
   assert.match(messages[0].content, /do not ask/i);
-  assert.match(messages[1].content, /一句话结论/);
-  assert.match(messages[1].content, /论文主旨/);
-  assert.match(messages[1].content, /核心方法/);
-  assert.match(messages[1].content, /证据与局限/);
+  assert.match(messages[0].content, /strong|medium|weak/i);
+  assert.match(messages[1].content, /核心贡献/);
+  assert.match(messages[1].content, /方法概览/);
+  assert.match(messages[1].content, /证据与可信度/);
+  assert.match(messages[1].content, /局限与失效场景/);
+  assert.match(messages[1].content, /关键对比与定位/);
+  assert.match(messages[1].content, /开放问题与下一步实验/);
   assert.match(messages[1].content, /900 Chinese characters/i);
+});
+
+test("buildInitialChatMessages follows researcher-oriented headings in en-US", () => {
+  const messages = buildInitialChatMessages(paper, "en-US");
+
+  assert.match(messages[0].content, /do not ask/i);
+  assert.match(messages[0].content, /strong \/ medium \/ weak/i);
+  assert.match(messages[1].content, /Core contribution \(1-2 claims\)/);
+  assert.match(messages[1].content, /Method overview \(what is actually new\)/);
+  assert.match(messages[1].content, /Evidence & credibility/);
+  assert.match(messages[1].content, /Limitations & failure modes/);
+  assert.match(messages[1].content, /Key comparisons \/ related-work positioning/);
+  assert.match(messages[1].content, /Open questions \/ next experiments/);
 });
 
 test("buildFollowupChatMessages keeps first answer and recent turns in balanced mode", () => {

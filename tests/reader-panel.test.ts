@@ -238,10 +238,14 @@ test("getSidebarStyles includes edge-resize, unified composer colors, and stream
   assert.match(css, /@keyframes zpr-stream-pulse/);
 });
 
-test("getSidebarStyles makes assistant output selectable and tables show grid lines", () => {
+test("getSidebarStyles makes the panel selectable, keeps controls exempt, and shows table grid lines", () => {
   const css = getSidebarStyles();
-  assert.match(css, /\.zpr-message-body[^}]*user-select:\s*text\s*!important/i);
-  assert.match(css, /\.zpr-message-body \*[^}]*user-select:\s*text\s*!important/i);
+  assert.doesNotMatch(css, /#zpr-sidebar-root[^}]*pointer-events:\s*none/i);
+  assert.match(css, /#zpr-sidebar-root[^}]*pointer-events:\s*auto/i);
+  assert.match(css, /#zpr-sidebar-root,\s*#zpr-sidebar-root \*[^}]*user-select:\s*text\s*!important/i);
+  assert.match(css, /\.zpr-sidebar-resize[^}]*user-select:\s*none\s*!important/i);
+  assert.match(css, /\.zpr-close-button[^}]*user-select:\s*none\s*!important/i);
+  assert.match(css, /\.zpr-text-button[^}]*user-select:\s*none\s*!important/i);
   assert.match(css, /\.zpr-message-body\s+table/i);
   assert.match(css, /\.zpr-message-body\s+th,\s*\.zpr-message-body\s+td/i);
   assert.match(css, /border:\s*1px/i);

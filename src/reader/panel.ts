@@ -7,6 +7,22 @@ import { getCurrentLocale } from "../i18n/index.ts";
 import { getResizedSidebarWidth, shouldAutoScrollTranscript } from "../runtime/reader-runtime.ts";
 
 const markdownRenderer = createMarkdownRenderer();
+const HOST_SHORTCUT_KEYS = new Set([
+  "Backspace",
+  "Delete",
+  "PageUp",
+  "PageDown",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  " ",
+  "Spacebar",
+  "Escape"
+]);
+const SELECTABLE_CONTENT_SELECTOR = ".zpr-chat-list, .zpr-message, .zpr-message-body, .zpr-meta, .zpr-notice";
+const NON_SELECTABLE_CONTROL_SELECTOR =
+  ".zpr-sidebar-resize, .zpr-close-button, .zpr-toolbar-button, .zpr-text-button, .zpr-composer, .zpr-jump-button, button";
 
 export interface ReaderPanelChromeHandlers {
   onClose: () => void;
@@ -88,6 +104,7 @@ class FixedSidebarHost implements ReaderPanelHost {
   private autoScroll = true;
   private lastManualScrollTop = 0;
   private isHidden = false;
+  private globalIsolationInstalled = false;
 
   constructor(
     doc: Document,
@@ -120,13 +137,10 @@ class FixedSidebarHost implements ReaderPanelHost {
       `;
       this.content = this.root.querySelector(".zpr-sidebar-content") as HTMLDivElement;
       (this.doc.body || this.doc.documentElement).appendChild(this.root);
-      // Some host documents disable selection globally; keep selection working inside the panel.
-      this.root.addEventListener("selectstart", (event) => {
-        event.stopPropagation();
-      });
       this.root.querySelector('[data-zpr-action="close-panel"]')?.addEventListener("click", () => {
         this.chromeHandlers.onClose();
       });
+      this.installGlobalIsolation();
       this.bindResizeHandle();
       this.syncLayout();
     }
@@ -329,6 +343,7 @@ class FixedSidebarHost implements ReaderPanelHost {
   }
 
   dispose(): void {
+    this.removeGlobalIsolation();
     this.doc.documentElement.style.removeProperty("--zpr-sidebar-width");
     this.doc.body?.style.removeProperty("margin-right");
     this.root?.remove();
@@ -342,6 +357,99 @@ class FixedSidebarHost implements ReaderPanelHost {
     this.composerInput = null;
     this.composerSendButton = null;
     this.currentSubmitHandler = null;
+  }
+
+  private installGlobalIsolation(): void {
+    const view = this.doc.defaultView;
+    if (!view || this.globalIsolationInstalled) {
+      return;
+    }
+    const options = { capture: true } as const;
+    view.addEventListener("keydown", this.handleWindowKeyCapture, options);
+    view.addEventListener("keyup", this.handleWindowKeyCapture, options);
+    view.addEventListener("pointerdown", this.handlePointerCapture, options);
+    view.addEventListener("pointerup", this.handlePointerCapture, options);
+    this.doc.addEventListener("mousedown", this.handlePointerCapture, options);
+    this.doc.addEventListener("mouseup", this.handlePointerCapture, options);
+    this.doc.addEventListener("click", this.handlePointerCapture, options);
+    this.doc.addEventListener("dragstart", this.handlePointerCapture, options);
+    this.doc.addEventListener("selectstart", this.handleSelectStartCapture, options);
+    this.globalIsolationInstalled = true;
+  }
+
+  private removeGlobalIsolation(): void {
+    const view = this.doc.defaultView;
+    if (!view || !this.globalIsolationInstalled) {
+      return;
+    }
+    const options = { capture: true } as const;
+    view.removeEventListener("keydown", this.handleWindowKeyCapture, options);
+    view.removeEventListener("keyup", this.handleWindowKeyCapture, options);
+    view.removeEventListener("pointerdown", this.handlePointerCapture, options);
+    view.removeEventListener("pointerup", this.handlePointerCapture, options);
+    this.doc.removeEventListener("mousedown", this.handlePointerCapture, options);
+    this.doc.removeEventListener("mouseup", this.handlePointerCapture, options);
+    this.doc.removeEventListener("click", this.handlePointerCapture, options);
+    this.doc.removeEventListener("dragstart", this.handlePointerCapture, options);
+    this.doc.removeEventListener("selectstart", this.handleSelectStartCapture, options);
+    this.globalIsolationInstalled = false;
+  }
+
+  private readonly handleWindowKeyCapture = (event: Event): void => {
+    if (!(event instanceof KeyboardEvent)) {
+      return;
+    }
+    if (this.doc.activeElement !== this.composerInput || !this.isComposerTarget(event.target) || !HOST_SHORTCUT_KEYS.has(event.key)) {
+      return;
+    }
+    stopHostEvent(event);
+  };
+
+  private readonly handlePointerCapture = (event: Event): void => {
+    if (!this.isPointerInSelectableContent(event)) {
+      return;
+    }
+    stopHostEvent(event);
+  };
+
+  private readonly handleSelectStartCapture = (event: Event): void => {
+    if (!this.isEventInsideSidebar(event) && !this.isSelectionInsideSidebar()) {
+      return;
+    }
+    stopHostEvent(event);
+  };
+
+  private isEventInsideSidebar(event: Event): boolean {
+    const target = event.target;
+    return target instanceof Node && Boolean(this.root?.contains(target));
+  }
+
+  private isComposerTarget(target: EventTarget | null): boolean {
+    return target instanceof Node && Boolean(this.composerInput?.contains(target));
+  }
+
+  private isPointerInSelectableContent(event: Event): boolean {
+    const target = event.target;
+    if (!(target instanceof Element) || !this.root?.contains(target)) {
+      return false;
+    }
+    if (target.closest(NON_SELECTABLE_CONTROL_SELECTOR)) {
+      return false;
+    }
+    return Boolean(target.closest(SELECTABLE_CONTENT_SELECTOR));
+  }
+
+  private isSelectionInsideSidebar(): boolean {
+    const selection = this.doc.defaultView?.getSelection?.();
+    if (!selection || selection.rangeCount < 1) {
+      return false;
+    }
+    const anchorNode = selection.anchorNode;
+    const focusNode = selection.focusNode;
+    return Boolean(
+      (anchorNode && this.root?.contains(anchorNode)) ||
+      (focusNode && this.root?.contains(focusNode))
+    );
   }
 
   private buildMessageBubble(message: ChatMessage, onReferenceClick: (reference: EvidenceReference) => void): HTMLDivElement {
@@ -454,9 +562,17 @@ class FixedSidebarHost implements ReaderPanelHost {
       this.draftValue = input.value;
       syncComposerDisabledState(input, sendButton, this.lastComposerBusy);
     });
+    input.addEventListener("beforeinput", (event) => {
+      const inputEvent = event as InputEvent;
+      if (inputEvent.inputType === "deleteContentBackward" || inputEvent.inputType === "deleteContentForward") {
+        stopHostEvent(inputEvent);
+      }
+    });
     input.addEventListener("keyup", (event) => {
-      // Prevent global reader shortcuts from stealing focus on keyup.
-      event.stopPropagation();
+      const keyboardEvent = event as KeyboardEvent;
+      if (HOST_SHORTCUT_KEYS.has(keyboardEvent.key)) {
+        stopHostEvent(keyboardEvent);
+      }
     });
     input.addEventListener("compositionstart", (event) => {
       this.isComposerComposing = true;
@@ -468,9 +584,9 @@ class FixedSidebarHost implements ReaderPanelHost {
     });
     input.addEventListener("keydown", (event) => {
       const keyboardEvent = event as KeyboardEvent;
-      // Prevent global reader shortcuts from seeing key presses while focused in the composer
-      // (e.g. Delete/Backspace triggering blur or navigation).
-      keyboardEvent.stopPropagation();
+      if (HOST_SHORTCUT_KEYS.has(keyboardEvent.key)) {
+        stopHostEvent(keyboardEvent);
+      }
       const action = getComposerKeyAction({
         key: keyboardEvent.key,
         shiftKey: keyboardEvent.shiftKey,
@@ -592,7 +708,7 @@ export function getSidebarStyles(): string {
         z-index: 2147483647;
         padding: 12px 12px 12px 0;
         box-sizing: border-box;
-        pointer-events: none;
+        pointer-events: auto;
         display: flex;
         position: fixed;
       }
@@ -644,6 +760,9 @@ export function getSidebarStyles(): string {
         height: 28px;
         flex: none;
         cursor: pointer;
+        user-select: none !important;
+        -moz-user-select: none !important;
+        -webkit-user-select: none !important;
       }
       .zpr-sidebar-content {
         flex: 1;
@@ -701,6 +820,9 @@ export function getSidebarStyles(): string {
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
+        user-select: none !important;
+        -moz-user-select: none !important;
+        -webkit-user-select: none !important;
       }
       .zpr-toolbar-button-danger {
         color: #b42318;
@@ -786,6 +908,12 @@ export function getSidebarStyles(): string {
         line-height: 1.65;
         font-size: 13px;
       }
+      #zpr-sidebar-root,
+      #zpr-sidebar-root * {
+        user-select: text !important;
+        -moz-user-select: text !important;
+        -webkit-user-select: text !important;
+      }
       .zpr-message-body {
         user-select: text !important;
         -moz-user-select: text !important;
@@ -864,6 +992,9 @@ export function getSidebarStyles(): string {
         cursor: pointer;
         font-size: 12px;
         font-weight: 600;
+        user-select: none !important;
+        -moz-user-select: none !important;
+        -webkit-user-select: none !important;
       }
       .zpr-citation-button,
       .zpr-citation-label {
@@ -930,6 +1061,9 @@ export function getSidebarStyles(): string {
         align-self: end;
         min-width: 72px;
         font-weight: 600;
+        user-select: none !important;
+        -moz-user-select: none !important;
+        -webkit-user-select: none !important;
       }
       .zpr-loading,
       .zpr-empty,
@@ -994,6 +1128,11 @@ export function getSidebarStyles(): string {
         opacity: 0.6;
       }
     `;
+}
+
+function stopHostEvent(event: Event): void {
+  event.stopPropagation();
+  event.stopImmediatePropagation?.();
 }
 
 class NoopPanelHost implements ReaderPanelHost {
