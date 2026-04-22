@@ -1185,6 +1185,15 @@ export function getSidebarStyles(): string {
         pointer-events: auto;
         transform: translateY(0);
       }
+      @media (prefers-reduced-motion: reduce) {
+        .zpr-jump-button {
+          transform: none;
+          transition: none;
+        }
+        .zpr-jump-button-visible {
+          transform: none;
+        }
+      }
       .zpr-composer-input {
         min-height: 64px;
         border: 1px solid rgba(148, 163, 184, 0.45);
