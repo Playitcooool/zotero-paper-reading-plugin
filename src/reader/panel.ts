@@ -1524,8 +1524,13 @@ async function copyText(doc: Document, value: string): Promise<boolean> {
   doc.body?.appendChild(textarea);
   textarea.select();
   try {
-    return Boolean(doc.execCommand?.("copy"));
-  } catch {
+    const result = doc.execCommand?.("copy");
+    if (!result) {
+      console.warn("[zpr] execCommand copy returned false");
+    }
+    return Boolean(result);
+  } catch (err) {
+    console.warn("[zpr] execCommand copy failed:", err);
     return false;
   } finally {
     textarea.remove();
