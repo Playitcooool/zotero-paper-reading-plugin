@@ -380,7 +380,7 @@ test("reader panel host shows a notice when copy falls back and still fails", as
     await Promise.resolve();
 
     assert.equal(notice!.textContent, "Copy failed. Please select the text and copy it manually.");
-    assert.equal(notice!.style.display, "block");
+    assert.ok(notice!.classList.contains("zpr-notice-visible"));
   } finally {
     await close();
   }

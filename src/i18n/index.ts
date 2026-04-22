@@ -44,6 +44,7 @@ export interface PluginStrings {
     clearConfirm: string;
     regenerateConfirm: string;
     suggestedQuestions: string[];
+    shortcutsHelp: string;
   };
   settings: {
     subtitle: string;
@@ -126,7 +127,8 @@ const ZH_CN: PluginStrings = {
       "这篇论文最核心的贡献是什么？",
       "哪些部分最值得迁移到实现中？",
       "这篇论文的主要局限和开放问题是什么？"
-    ]
+    ],
+    shortcutsHelp: "Enter 发送 · Shift+Enter 换行"
   },
   settings: {
     subtitle: "为 Zotero PDF 阅读器提供可继续追问的论文聊天侧栏，并自动保存当前会话。",
@@ -218,7 +220,8 @@ const EN_US: PluginStrings = {
       "What is the core contribution of this paper?",
       "What parts are most reusable for implementation?",
       "What are the main limitations or open questions?"
-    ]
+    ],
+    shortcutsHelp: "Enter to send · Shift+Enter for newline"
   },
   settings: {
     subtitle: "Open a follow-up-friendly paper chat sidebar for Zotero PDFs and save the current session automatically.",

@@ -262,7 +262,7 @@ class FixedSidebarHost implements ReaderPanelHost {
       const toolbar = this.doc.createElement("div");
       toolbar.className = "zpr-result-head";
       toolbar.innerHTML = `<div class="zpr-result-actions">${toolbarActions.map((action) => (
-        `<button type="button" class="zpr-toolbar-button${action.danger ? " zpr-toolbar-button-danger" : ""}" data-zpr-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>`
+        `<button type="button" class="zpr-toolbar-button${action.danger ? " zpr-toolbar-button-danger" : ""}" data-zpr-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}<span class="zpr-toolbar-spinner" aria-hidden="true" hidden></span></button>`
       )).join("")}</div>`;
       this.content.insertBefore(toolbar, this.content.firstChild);
 
@@ -397,7 +397,10 @@ class FixedSidebarHost implements ReaderPanelHost {
   };
 
   private readonly handleSelectStartCapture = (event: Event): void => {
-    if (!this.isEventInsideSidebar(event) && !this.isSelectionInsideSidebar()) {
+    const eventInside = this.isEventInsideSidebar(event);
+    const selectionInside = this.isSelectionInsideSidebar();
+    // Only stop if BOTH event target AND selection are inside sidebar
+    if (!eventInside || !selectionInside) {
       return;
     }
     stopHostEvent(event);
@@ -526,6 +529,7 @@ class FixedSidebarHost implements ReaderPanelHost {
     composer.innerHTML = `
       <textarea class="zpr-composer-input" aria-label="${escapeHtml(this.strings.panel.composerPlaceholder)}" placeholder="${escapeHtml(this.strings.panel.composerPlaceholder)}"></textarea>
       <button type="submit" class="zpr-composer-send">${escapeHtml(this.strings.panel.send)}</button>
+      <div class="zpr-composer-hint">${escapeHtml(this.strings.panel.shortcutsHelp)}</div>
     `;
     const input = composer.querySelector(".zpr-composer-input") as HTMLTextAreaElement | null;
     const sendButton = composer.querySelector(".zpr-composer-send") as HTMLButtonElement | null;
@@ -653,7 +657,7 @@ class FixedSidebarHost implements ReaderPanelHost {
   private syncLayout(): void {
     this.doc.documentElement.style.setProperty("--zpr-sidebar-width", `${this.sidebarWidth}px`);
     if (this.root) {
-      this.root.style.display = this.isHidden ? "none" : "block";
+      this.root.style.display = this.isHidden ? "none" : "flex";
       const topInset = this.isReaderDoc ? this.resolveReaderTopInset() : 0;
       this.root.style.top = `${topInset}px`;
       this.root.style.height = topInset > 0 ? `calc(100vh - ${topInset}px)` : "100vh";
@@ -765,12 +769,12 @@ class FixedSidebarHost implements ReaderPanelHost {
     this.failedTurnNode = error;
   }
 
-  private setNotice(message: string | null): void {
+private setNotice(message: string | null): void {
     if (!this.notice) {
       return;
     }
     this.notice.textContent = message || "";
-    this.notice.style.display = message ? "block" : "none";
+    this.notice.classList.toggle("zpr-notice-visible", Boolean(message));
   }
 
   private async handleCopyMessage(button: HTMLButtonElement | null, value: string): Promise<void> {
@@ -874,7 +878,7 @@ export function getSidebarStyles(): string {
       .zpr-citation-button:focus-visible {
         outline: none;
         box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
-        border-radius: 12px;
+        border-radius: inherit;
       }
       .zpr-sidebar-content {
         flex: 1;
@@ -942,6 +946,24 @@ export function getSidebarStyles(): string {
       .zpr-toolbar-button:disabled {
         opacity: 0.55;
       }
+      .zpr-toolbar-spinner {
+        display: none;
+        width: 10px;
+        height: 10px;
+        border: 1.5px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        margin-left: 4px;
+        vertical-align: middle;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .zpr-toolbar-spinner {
+          animation: zpr-spin 0.8s linear infinite;
+        }
+      }
+      .zpr-toolbar-button:disabled .zpr-toolbar-spinner:not([hidden]) {
+        display: inline-block;
+      }
       .zpr-meta {
         margin-bottom: 4px;
       }
@@ -993,7 +1015,6 @@ export function getSidebarStyles(): string {
         height: 8px;
         border-radius: 999px;
         background: #2563eb;
-        animation: zpr-stream-pulse 1s ease-in-out infinite;
       }
       .zpr-message-meta {
         display: flex;
@@ -1130,9 +1151,17 @@ export function getSidebarStyles(): string {
       .zpr-composer {
         display: grid;
         grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
         gap: 10px;
         padding-top: 12px;
         border-top: 1px solid rgba(226, 232, 240, 0.85);
+      }
+      .zpr-composer-hint {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        font-size: 11px;
+        color: #94a3b8;
+        margin-top: -4px;
       }
       .zpr-jump-button {
         align-self: center;
@@ -1207,11 +1236,12 @@ export function getSidebarStyles(): string {
         flex-direction: column;
         gap: 8px;
       }
-      .zpr-suggestion-button {
+.zpr-suggestion-button {
         text-align: left;
         background: #f8fafc;
       }
       .zpr-notice {
+        display: none;
         margin-bottom: 14px;
         padding: 10px 12px;
         border-radius: 12px;
@@ -1220,19 +1250,21 @@ export function getSidebarStyles(): string {
         font-size: 12px;
         line-height: 1.5;
       }
+      .zpr-notice-visible {
+        display: flex;
+      }
       .zpr-pending {
         display: flex;
         align-items: center;
         gap: 8px;
       }
-      .zpr-spinner {
-        width: 14px;
-        height: 14px;
-        border: 2px solid rgba(148, 163, 184, 0.35);
-        border-top-color: #2563eb;
-        border-radius: 999px;
-        animation: zpr-spin 0.8s linear infinite;
-        flex: none;
+      @media (prefers-reduced-motion: no-preference) {
+        .zpr-spinner {
+          animation: zpr-spin 0.8s linear infinite;
+        }
+        .zpr-message-streaming::after {
+          animation: zpr-stream-pulse 1s ease-in-out infinite;
+        }
       }
       @keyframes zpr-spin {
         to { transform: rotate(360deg); }
