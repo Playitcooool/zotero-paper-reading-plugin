@@ -1501,8 +1501,9 @@ async function copyText(doc: Document, value: string): Promise<boolean> {
     try {
       await clipboard.writeText(value);
       return true;
-    } catch {
+    } catch (err) {
       // Fall back to execCommand below.
+      console.warn("[zpr] clipboard.writeText failed, falling back to execCommand:", err);
     }
   }
 
