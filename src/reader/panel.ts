@@ -1245,9 +1245,12 @@ export function getSidebarStyles(): string {
         flex-direction: column;
         gap: 8px;
       }
-.zpr-suggestion-button {
+      .zpr-suggestion-button {
         text-align: left;
         background: #f8fafc;
+      }
+      .zpr-suggestion-button:disabled {
+        opacity: 0.6;
       }
       .zpr-notice {
         display: none;
