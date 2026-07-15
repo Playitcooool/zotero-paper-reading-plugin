@@ -79,17 +79,6 @@ export interface PaperContext {
   attachmentText: string;
 }
 
-export interface AnalysisRequest {
-  paper: PaperContext;
-  prompt: string;
-}
-
-export interface BackendResponse {
-  content: string | Record<string, unknown>;
-  backendLabel: string;
-  model: string;
-}
-
 export interface LLMMessage {
   role: ChatMessageRole;
   content: string;
@@ -127,19 +116,6 @@ export interface AnalysisBackend {
   label: string;
   chat(request: ChatRequest): Promise<ChatResponse>;
   chatStream(request: ChatRequest): AsyncIterable<ChatStreamEvent>;
-}
-
-export interface PanelSessionState {
-  itemID: number;
-  startedAt: string;
-  status: "idle" | "loading" | "success" | "error";
-}
-
-export interface PersistenceRecord {
-  attachmentItemID: number;
-  noteItemID: number;
-  updatedAt: string;
-  backendLabel: string;
 }
 
 export const SECTION_ORDER: SectionId[] = [

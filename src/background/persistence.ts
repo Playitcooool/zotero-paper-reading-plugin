@@ -46,12 +46,6 @@ export function findExistingChatNote<T extends { id: number; note: string }>(not
   return notes.find((note) => note.note.includes(CHAT_MARKER_PREFIX));
 }
 
-export async function loadSavedAnalysisForAttachment(attachment: Zotero.Item): Promise<AnalysisResult | null> {
-  const notes = await getAttachmentNotes(attachment);
-  const existing = findExistingAnalysisNote(notes);
-  return existing ? parseAnalysisNoteHtml(existing.note) : null;
-}
-
 export async function loadSavedChatSessionForAttachment(attachment: Zotero.Item): Promise<ChatSession | null> {
   const notes = await getAttachmentNotes(attachment);
   const chatNote = findExistingChatNote(notes);
@@ -66,28 +60,6 @@ export async function loadSavedChatSessionForAttachment(attachment: Zotero.Item)
 
   const analysis = parseAnalysisNoteHtml(analysisNote.note);
   return analysis ? convertLegacyAnalysisToChatSession(analysis) : null;
-}
-
-export async function saveAnalysisForAttachment(attachment: Zotero.Item, result: AnalysisResult): Promise<number> {
-  const html = buildAnalysisNoteHtml(result);
-  const notes = await getAttachmentNotes(attachment);
-  const existing = findExistingAnalysisNote(notes);
-
-  if (existing) {
-    existing.setNote(html);
-    await existing.saveTx();
-    return existing.id;
-  }
-
-  const note = new Zotero.Item("note");
-  note.libraryID = attachment.libraryID;
-  const parentItemID = resolveRegularParentItemID(attachment);
-  if (parentItemID) {
-    note.parentItemID = parentItemID;
-  }
-  note.setNote(html);
-  await note.saveTx();
-  return note.id;
 }
 
 export async function saveChatSessionForAttachment(attachment: Zotero.Item, session: ChatSession): Promise<number> {
